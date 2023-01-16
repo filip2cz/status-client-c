@@ -1,0 +1,5 @@
+ncat status.fkomarek.eu 35601
+
+filip:dTNaGeLFCSKKgo49
+
+update {\"online6\": false,  \"uptime\": 229, \"load\": 0.93, \"memory_total\": 12200460, \"memory_used\": 2499944, \"swap_total\": 12201980, \"swap_used\": 0, \"hdd_total\": 3761418, \"hdd_used\": 1161319, \"cpu\": 19.0, \"network_rx\": 0, \"network_tx\": 0 } 
