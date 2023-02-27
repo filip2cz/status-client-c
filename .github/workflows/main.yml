@@ -7,6 +7,8 @@ on:
       
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout
@@ -26,10 +28,17 @@ jobs:
         with:
           name: builded
           path: ./status
+          
+      - name: Set outputs
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "./status"
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit: master
+          artifacts: "./status"
+          commit: main
           generateReleaseNotes: true
           draft: true
+          # tag: ${{ github.event.head_commit.id }}
+          tag: ${{ steps.vars.outputs.sha_short }}
