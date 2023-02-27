@@ -29,8 +29,7 @@ jobs:
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "./status"
-          token: ${{ secrets.GITHUB_TOKEN }}
           commit: master
           generateReleaseNotes: true
           draft: true
-          tag: ${{github.head_ref}}
+          tag: ${{github.sha}}
