@@ -33,3 +33,4 @@ jobs:
           commit: master
           generateReleaseNotes: true
           draft: true
+          tag: ${{github.head_ref}}
