@@ -18,7 +18,7 @@ jobs:
           version: latest
           platform: x64
           
-      - run: gcc ./status.c status
+      - run: gcc ./status.c -o status
       
       - uses: actions/upload-artifact@v3
         with:
