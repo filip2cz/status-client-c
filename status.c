@@ -1,7 +1,9 @@
 
 /*
   This is fork of "Socket and relative networking functions demonstration for ETC" from Pavel Troller.
-  Thanks Pavel Troller and https://github.com/ur-fault for help.
+  Thanks Pavel Troller for networking part of this code.
+  Thanks Mikuláš Jan Honys (https://github.com/ur-fault) for help with code and github actions.
+  Thanks to OpenAI for help with variables.
 
 */
 
