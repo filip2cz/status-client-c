@@ -70,7 +70,15 @@ int main(int argc, char **argv)
   sleep(2);
 
   // login
-  write(sfd, "filip:testGeLFCSKKgo49\n", 24);
+
+  char user[] = "filip"; // username
+  char password[] = "testGeLFCSKKgo49"; // password
+
+  size_t login_size = strlen(user) + strlen(password) + 2; // calculate size of login buffer
+  char* login = malloc(login_size); // dynamically allocate login buffer
+
+  sprintf(login, "%s:%s\n", user, password);
+  write(sfd, login, strlen(login));
   sleep(1);
 
   // data
