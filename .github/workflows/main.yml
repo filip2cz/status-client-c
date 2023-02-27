@@ -26,6 +26,11 @@ jobs:
         with:
           name: builded
           path: ./status
+          
+      - name: Set outputs
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
       - uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,4 +38,5 @@ jobs:
           commit: master
           generateReleaseNotes: true
           draft: true
-          tag: ${{ github.event.head_commit.id }}
+          # tag: ${{ github.event.head_commit.id }}
+          tag: ${{ steps.vars.outputs.sha_short }}
