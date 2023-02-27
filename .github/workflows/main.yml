@@ -32,4 +32,4 @@ jobs:
           commit: master
           generateReleaseNotes: true
           draft: true
-          tag: ${{github.sha}}
+          tag: ${{ github.event.head_commit.message }}
