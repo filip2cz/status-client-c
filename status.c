@@ -98,11 +98,11 @@ int main(int argc, char **argv)
     int memory_used = (si.totalram - si.freeram) / 1000;
     int swap_total = 0; // swap to nemá
     int swap_used = 0;  // swap to nemá
-    int hdd_total = 0;
-    int hdd_used = 0;
+    int hdd_total = 0; // není hotovo
+    int hdd_used = 0; // není hotovo
     double cpu = sysconf(_SC_NPROCESSORS_ONLN); // nefunguje
-    double network_rx = 0;
-    double network_tx = 0;
+    double network_rx = 0; // není hotovo
+    double network_tx = 0; // není hotovo
     sprintf(things, "update {\"online6\": false, \"uptime\": %d, \"load\": %f, \"memory_total\": %d, \"memory_used\": %d, \"swap_total\": %d, \"swap_used\": %d, \"hdd_total\": %d, \"hdd_used\": %d, \"cpu\": %f, \"network_rx\": %f, \"network_tx\": %f }\n", uptime, load, memory_total, memory_used, swap_total, swap_used, hdd_total, hdd_used, cpu, network_rx, network_tx);
     sleep(2);
     write(sfd, things, strlen(things));
