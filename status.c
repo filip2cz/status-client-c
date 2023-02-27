@@ -152,16 +152,35 @@ int main(int argc, char **argv)
     }
     fclose(fp);
 
+    // CPU
+
+    char line[128];
+    FILE* file = fopen("/proc/stat", "r");
+    fgets(line, sizeof(line), file);
+    fclose(file);
+    char* cpu_info = strchr(line, ' ') + 1;
+    unsigned long long int user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice;
+    sscanf(cpu_info, "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal, &guest, &guest_nice);
+    unsigned long long int idle_total = idle + iowait;
+    unsigned long long int total = user + nice + system + idle_total + irq + softirq + steal;
+    static unsigned long long int prev_idle = 0;
+    static unsigned long long int prev_total = 0;
+    unsigned long long int diff_idle = idle_total - prev_idle;
+    unsigned long long int diff_total = total - prev_total;
+    unsigned int diff_usage = (1000 * (diff_total - diff_idle) / diff_total + 5) / 10;
+    prev_idle = idle_total;
+    prev_total = total;
+
     char ipv6[] = "false"; // coming soon
     int uptime = si.uptime;
     //double load = si.loads[0] / 1000;
     int memory_total = si.totalram / 1024;
     int memory_used = (si.totalram - si.freeram) / 1024;
-    int swap_total = (int) (total_swap / 1024);;
-    int swap_used = (int) (used_swap / 1024);;
+    int swap_total = (int) (total_swap / 1024);
+    int swap_used = (int) (used_swap / 1024);
     int hdd_total = (int) (total_size / 1048576);
     int hdd_used = (int) (used_space / 1048576);
-    double cpu = sysconf(_SC_NPROCESSORS_ONLN); // coming soon
+    double cpu = diff_usage;
     double network_rx = 0; // coming soon
     double network_tx = 0; // coming soon
     sprintf(things, "update {\"online6\": false, \"uptime\": %d, \"load\": %f, \"memory_total\": %d, \"memory_used\": %d, \"swap_total\": %d, \"swap_used\": %d, \"hdd_total\": %d, \"hdd_used\": %d, \"cpu\": %f, \"network_rx\": %f, \"network_tx\": %f }\n", uptime, load, memory_total, memory_used, swap_total, swap_used, hdd_total, hdd_used, cpu, network_rx, network_tx);
