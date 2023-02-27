@@ -16,6 +16,7 @@
 #include <stdlib.h> /* exit() */
 #include <netdb.h>  /* gethostbyname */
 #include <sys/sysinfo.h>
+#include <sys/statvfs.h>
 
 int main(int argc, char **argv)
 {
@@ -118,7 +119,22 @@ int main(int argc, char **argv)
     // sysinfo
     // everything with sysinfo is created helped with https://chat.openai.com/, thanks for it
     struct sysinfo si;
+    struct statvfs fs_info;
     sysinfo(&si);
+
+    if (statvfs("/", &fs_info) == -1) {
+      perror("Failed to get filesystem information");
+      return 1;
+    }
+
+    // Available space in bytes
+    long long avail_space = fs_info.f_frsize * fs_info.f_bfree;
+
+    // Total size of filesystem in bytes
+    long long total_size = fs_info.f_frsize * fs_info.f_blocks;
+
+    // Used space in bytes
+    long long used_space = total_size - avail_space;
 
     char ipv6[] = "false"; // nemá to ipv6
     int uptime = si.uptime;
@@ -127,8 +143,8 @@ int main(int argc, char **argv)
     int memory_used = (si.totalram - si.freeram) / 1000;
     int swap_total = 0; // swap to nemá
     int swap_used = 0;  // swap to nemá
-    int hdd_total = 0; // není hotovo
-    int hdd_used = 0; // není hotovo
+    int hdd_total = (int) (total_size / 1000000);;
+    int hdd_used = (int) (used_space / 1000000);;
     double cpu = sysconf(_SC_NPROCESSORS_ONLN); // nefunguje
     double network_rx = 0; // není hotovo
     double network_tx = 0; // není hotovo
