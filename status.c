@@ -3,7 +3,7 @@
   This is fork of "Socket and relative networking functions demonstration for ETC" from Pavel Troller.
   Thanks Pavel Troller for networking part of this code.
   Thanks Mikuláš Jan Honys (https://github.com/ur-fault) for help with code and github actions.
-  Thanks to OpenAI for help with variables.
+  Thanks to OpenAI for help with variables, everything with sysinfo and statvfs.
 
 */
 
@@ -116,8 +116,6 @@ int main(int argc, char **argv)
   char *things = (char *)malloc(buffer_size * sizeof(char));
   while (1)
   {
-    // sysinfo
-    // everything with sysinfo is created helped with https://chat.openai.com/, thanks for it
     struct sysinfo si;
     struct statvfs fs_info;
     sysinfo(&si);
@@ -136,18 +134,18 @@ int main(int argc, char **argv)
     // Used space in bytes
     long long used_space = total_size - avail_space;
 
-    char ipv6[] = "false"; // nemá to ipv6
+    char ipv6[] = "false"; // coming soon
     int uptime = si.uptime;
-    double load = si.loads[0] / 65536; // nefunguje
+    double load = si.loads[0] / 65536; // coming soon
     int memory_total = si.totalram / 1000;
     int memory_used = (si.totalram - si.freeram) / 1000;
     int swap_total = 0; // swap to nemá
     int swap_used = 0;  // swap to nemá
-    int hdd_total = (int) (total_size / 1000000);;
-    int hdd_used = (int) (used_space / 1000000);;
-    double cpu = sysconf(_SC_NPROCESSORS_ONLN); // nefunguje
-    double network_rx = 0; // není hotovo
-    double network_tx = 0; // není hotovo
+    int hdd_total = (int) (total_size / 1048576);
+    int hdd_used = (int) (used_space / 1048576);
+    double cpu = sysconf(_SC_NPROCESSORS_ONLN); // coming soon
+    double network_rx = 0; // coming soon
+    double network_tx = 0; // coming soon
     sprintf(things, "update {\"online6\": false, \"uptime\": %d, \"load\": %f, \"memory_total\": %d, \"memory_used\": %d, \"swap_total\": %d, \"swap_used\": %d, \"hdd_total\": %d, \"hdd_used\": %d, \"cpu\": %f, \"network_rx\": %f, \"network_tx\": %f }\n", uptime, load, memory_total, memory_used, swap_total, swap_used, hdd_total, hdd_used, cpu, network_rx, network_tx);
     sleep(2);
     write(sfd, things, strlen(things));
