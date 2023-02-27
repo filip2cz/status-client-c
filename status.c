@@ -134,13 +134,18 @@ int main(int argc, char **argv)
     // Used space in bytes
     long long used_space = total_size - avail_space;
 
+    // Swap
+    long long total_swap = si.totalswap;
+    long long free_swap = si.freeswap;
+    long long used_swap = total_swap - free_swap;
+
     char ipv6[] = "false"; // coming soon
     int uptime = si.uptime;
     double load = si.loads[0] / 65536; // coming soon
-    int memory_total = si.totalram / 1000;
-    int memory_used = (si.totalram - si.freeram) / 1000;
-    int swap_total = 0; // swap to nemá
-    int swap_used = 0;  // swap to nemá
+    int memory_total = si.totalram / 1024;
+    int memory_used = (si.totalram - si.freeram) / 1024;
+    int swap_total = (int) (total_swap / 1024);; // coming soon
+    int swap_used = (int) (used_swap / 1024);;  // coming soon
     int hdd_total = (int) (total_size / 1048576);
     int hdd_used = (int) (used_space / 1048576);
     double cpu = sysconf(_SC_NPROCESSORS_ONLN); // coming soon
