@@ -71,15 +71,42 @@ int main(int argc, char **argv)
 
   // login
 
-  char user[] = "filip"; // username
-  char password[] = "testGeLFCSKKgo49"; // password
+  char user[64];
+  char password[64];
 
-  size_t login_size = strlen(user) + strlen(password) + 2; // calculate size of login buffer
-  char* login = malloc(login_size); // dynamically allocate login buffer
+  // open file for reading
+  FILE* fp = fopen("login.txt", "r");
+  if (fp == NULL) {
+    perror("Failed to open file");
+    exit(EXIT_FAILURE);
+  }
 
+  // read username and password from file
+  if (fscanf(fp, "%s %s", user, password) != 2) {
+    fprintf(stderr, "Failed to read username and password from file\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // close file
+  fclose(fp);
+
+  // calculate size of login buffer
+  size_t login_size = strlen(user) + strlen(password) + 2;
+
+  // allocate login buffer
+  char* login = malloc(login_size);
+  if (login == NULL) {
+    perror("Failed to allocate memory");
+    exit(EXIT_FAILURE);
+  }
+
+  // format login string and send to server
   sprintf(login, "%s:%s\n", user, password);
   write(sfd, login, strlen(login));
   sleep(1);
+
+  // free dynamically allocated memory
+  free(login);
 
   // data
   size_t buffer_size = 1000;
