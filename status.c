@@ -1,4 +1,3 @@
-
 /*
   This is fork of "Socket and relative networking functions demonstration for ETC" from Pavel Troller.
   Thanks Pavel Troller for networking part of this code.
@@ -139,13 +138,27 @@ int main(int argc, char **argv)
     long long free_swap = si.freeswap;
     long long used_swap = total_swap - free_swap;
 
+    // load
+    double load;
+    FILE *fp = fopen("/proc/loadavg", "r");
+    if (fp == NULL) {
+        perror("Failed to open /proc/loadavg");
+        return 1;
+    }
+    int ret = fscanf(fp, "%lf", &load);
+    if (ret != 1) {
+        perror("Failed to read load from /proc/loadavg");
+        return 1;
+    }
+    fclose(fp);
+
     char ipv6[] = "false"; // coming soon
     int uptime = si.uptime;
-    double load = si.loads[0] / 65536; // coming soon
+    //double load = si.loads[0] / 1000;
     int memory_total = si.totalram / 1024;
     int memory_used = (si.totalram - si.freeram) / 1024;
-    int swap_total = (int) (total_swap / 1024);; // coming soon
-    int swap_used = (int) (used_swap / 1024);;  // coming soon
+    int swap_total = (int) (total_swap / 1024);;
+    int swap_used = (int) (used_swap / 1024);;
     int hdd_total = (int) (total_size / 1048576);
     int hdd_used = (int) (used_space / 1048576);
     double cpu = sysconf(_SC_NPROCESSORS_ONLN); // coming soon
