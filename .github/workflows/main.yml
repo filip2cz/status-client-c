@@ -37,7 +37,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: "./status"
-          commit: master
+          commit: main
           generateReleaseNotes: true
           draft: true
           # tag: ${{ github.event.head_commit.id }}
