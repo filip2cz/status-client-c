@@ -27,6 +27,7 @@ jobs:
 
       - run: sudo apt update
       - run: sudo apt install gcc-multilib
+      - run: export LD_LIBRARY_PATH=/usr/lib32:$LD_LIBRARY_PATH
       - run: gcc -m32 ./status.c -o ./build/status-linux-x86
       - run: sudo apt purge gcc-multilib
 
