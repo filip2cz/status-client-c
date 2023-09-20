@@ -13,11 +13,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-        
-      - name: Compile
-        uses: egor-tensin/setup-gcc@v1
-        with:
-          version: 9
+
+      - run: sudo apt update
+      - run: sudo apt install gcc
           
       - run: gcc --version
       - run: ldd --version
@@ -25,7 +23,6 @@ jobs:
       - run: mkdir build
       - run: gcc ./status.c -o ./build/status-linux-x64
 
-      - run: sudo apt update
       - run: sudo apt install gcc-multilib libc6-dev-i386 && gcc -m32 ./status.c -o ./build/status-linux-x86
       - run: sudo apt purge gcc-multilib libc6-dev-i386
 
