@@ -27,7 +27,7 @@ jobs:
       - run: mkdir build
       - run: gcc ./status.c -o ./build/status-linux-x64
       - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
-      - run: gcc-arm-linux-gnueabihf ./status.c -o ./build/status-linux-armv7l
+      - run: arm-linux-gnueabihf-gcc ./status.c -o ./build/status-linux-armv7l
           
       - name: Set outputs
         id: vars
