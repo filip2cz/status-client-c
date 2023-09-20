@@ -22,10 +22,11 @@ jobs:
       - run: gcc --version
       - run: ldd --version
       - run: sudo apt update
-      - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+      - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-multilib
           
       - run: mkdir build
       - run: gcc ./status.c -o ./build/status-linux-x64
+      - run: gcc -m32 ./status.c -o ./build/status-linux-x86
       - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
       - run: arm-linux-gnueabihf-gcc ./status.c -o ./build/status-linux-armv7l
           
