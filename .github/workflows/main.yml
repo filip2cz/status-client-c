@@ -26,8 +26,7 @@ jobs:
       - run: gcc ./status.c -o ./build/status-linux-x64
 
       - run: sudo apt update
-      - run: sudo apt install gcc-multilib
-      - run: export LD_LIBRARY_PATH=/usr/lib32:$LD_LIBRARY_PATH
+      - run: sudo apt install gcc-multilib libc6-dev-i386 libx32gcc-8-dev 
       - run: gcc -m32 ./status.c -o ./build/status-linux-x86
       - run: sudo apt purge gcc-multilib
 
