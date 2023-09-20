@@ -26,9 +26,9 @@ jobs:
       - run: gcc ./status.c -o ./build/status-linux-x64
 
       - run: sudo apt update
-      - run: sudo apt install gcc-multilib libc6-dev-i386 libx32gcc-8-dev 
+      - run: sudo apt install gcc-multilib libc6-dev-i386
       - run: gcc -m32 ./status.c -o ./build/status-linux-x86
-      - run: sudo apt purge gcc-multilib libc6-dev-i386 libx32gcc-8-dev 
+      - run: sudo apt purge gcc-multilib libc6-dev-i386
 
       - run: sudo apt install gcc-aarch64-linux-gnu
       - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
