@@ -24,12 +24,11 @@ jobs:
       - run: sudo apt update
       - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
           
-      - run: |
-        mkdir build
-        gcc ./status.c -o ./build/status-linux-x64
-        gcc -m32 ./status.c -o ./build/status-linux-x86
-        aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
-        gcc-arm-linux-gnueabihf ./status.c -o ./build/status-linux-armv7l
+      - run: mkdir build
+      - run: gcc ./status.c -o ./build/status-linux-x64
+      - run: gcc -m32 ./status.c -o ./build/status-linux-x86
+      - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
+      - run: gcc-arm-linux-gnueabihf ./status.c -o ./build/status-linux-armv7l
           
       - name: Set outputs
         id: vars
