@@ -16,6 +16,8 @@ jobs:
 
       - run: sudo apt update
       - run: sudo apt install gcc gcc-multilib gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+      - run: wget wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
+      - run: tar -xf blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
           
       - run: gcc --version
       - run: ldd --version
@@ -25,6 +27,7 @@ jobs:
       - run: gcc -m32 ./status.c -o ./build/status-linux-x86
       - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
       - run: arm-linux-gnueabihf-gcc ./status.c -o ./build/status-linux-armv7l
+      - run: ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc ./status.c -o ./build/status-blackfin
           
       - name: Set outputs
         id: vars
