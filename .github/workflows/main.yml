@@ -14,20 +14,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         
-      - name: Set up GCC
+      - name: Compile
         uses: egor-tensin/setup-gcc@v1
         with:
           version: 9
           
       - run: gcc --version
       - run: ldd --version
+      - run: sudo apt update
+      - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
           
-      - run: gcc ./status.c -o status
-      
-      - uses: actions/upload-artifact@v3
-        with:
-          name: builded
-          path: ./status
+      - run: |
+        mkdir build
+        gcc ./status.c -o ./build/status-linux-x64
+        gcc -m32 ./status.c -o ./build/status-linux-x86
+        aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
+        gcc-arm-linux-gnueabihf ./status.c -o ./build/status-linux-armv7l
           
       - name: Set outputs
         id: vars
@@ -36,7 +38,7 @@ jobs:
       - uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "./status"
+          artifacts: "./build/status*"
           commit: main
           generateReleaseNotes: true
           draft: true
