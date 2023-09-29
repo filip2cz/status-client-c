@@ -30,7 +30,8 @@ jobs:
       - run: arm-linux-gnueabihf-gcc ./status.c -o ./build/status-linux-armv7l
       - run: sudo apt purge gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
 
-      - run: sudo apt install gcc-arm-linux-gnueabi && arm-linux-gnueabi-gcc -march=armv5te ./status.c ./build/status-linux-armv5te
+      - run: sudo apt install gcc-arm-linux-gnueabi
+      - run: arm-linux-gnueabi-gcc -march=armv5te ./status.c ./build/status-linux-armv5te
       - run: sudo apt purge gcc-arm-linux-gnueabi
 
       - run: wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
