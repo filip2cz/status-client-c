@@ -25,32 +25,7 @@ jobs:
       - run: sudo apt install gcc gcc-multilib
 
       - run: python2 -m nuitka --standalone client.py
-      - run: mv ./client.dist/client.bin ./build/client-x64.bin
-      - run: rm -r client.dist && rm -r client.build
-      - run: sudo apt purge gcc-multilib
-
-      - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-
-      - run: python2 -m nuitka --cc=aarch64-linux-gnu-gcc --standalone client.py
-      - run: mv ./client.dist/client.bin ./build/client-aarch64.bin
-      - run: rm -r client.dist && rm -r client.build
-
-      - run: python2 -m nuitka --cc=arm-linux-gnueabihf-gcc --standalone client.py
-      - run: mv ./client.dist/client.bin ./build/client-armv7l.bin
-      - run: rm -r client.dist && rm -r client.build
-
-      # - run: sudo apt purge gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-
-      # - run: sudo apt install gcc-arm-linux-gnueabi
-      # - run: arm-linux-gnueabi-gcc -march=armv5te ./status.c -o ./build/status-linux-armv5te
-      # - run: sudo apt purge gcc-arm-linux-gnueabi
-
-      # - run: wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
-      # - run: wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
-      # - run: tar -xf blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
-      # - run: tar -xf blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
-
-      # - run: ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc ./status.c -o ./build/status-linux-blackfin
+      - run: mv ./client.dist/client.bin ./build/client.bin
           
       - name: Set outputs
         id: vars
