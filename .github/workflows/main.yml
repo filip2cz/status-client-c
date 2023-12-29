@@ -31,11 +31,11 @@ jobs:
 
       - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
 
-      - run: nuitka --cc=aarch64-linux-gnu-gcc --standalone client.py
+      - run: python2 -m nuitka --cc=aarch64-linux-gnu-gcc --standalone client.py
       - run: mv ./client.dist/client.bin ./build/client-aarch64.bin
       - run: rm -r client.dist && rm -r client.build
 
-      - run: nuitka --cc=arm-linux-gnueabihf-gcc --standalone client.py
+      - run: python2 -m nuitka --cc=arm-linux-gnueabihf-gcc --standalone client.py
       - run: mv ./client.dist/client.bin ./build/client-armv7l.bin
       - run: rm -r client.dist && rm -r client.build
 
