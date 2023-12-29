@@ -1,10 +1,15 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
+import sys
 
-SERVER = "status.botox.bz"
-PORT = 35601
-USER = "s01"
-PASSWORD = "some-hard-to-guess-copy-paste-password"
+if len(sys.argv) != 5:
+    print("Usage: client.bin <server> <port> <username> <password>")
+    sys.exit(1)
+
+SERVER = sys.argv[1]
+PORT = int(sys.argv[2])
+USER = sys.argv[3]
+PASSWORD = sys.argv[4]
 INTERVAL = 1 # Update interval
 
 
