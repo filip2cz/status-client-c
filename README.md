@@ -1,6 +1,7 @@
 # status C client for Linux
 
 Original client of https://github.com/BotoX/ServerStatus compiled into C with Nuitka.
+
 Changes in original client: https://github.com/filip2cz/status-client-c/commit/84a4d6b5ee3e50abaa3b0ee80d0ee887e05fadd6
 
 ## Usage
