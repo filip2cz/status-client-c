@@ -1,0 +1,7 @@
+python2 -m nuitka --standalone --generate-c-only client.py
+
+gcc -o client.bin module.__main__.c
+
+copy ~/.local/lib/python2.7/site-packages/nuitka/ into working folder
+
+< > = it is looking for it in defined directories?
