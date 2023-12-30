@@ -25,7 +25,7 @@ jobs:
       - run: sudo apt install gcc gcc-multilib
 
       - run: python2 -m nuitka --standalone client.py
-      - run: mv ./client.dist/client.bin ./build/client.bin
+      - run: mv ./client.dist/client.bin ./build/client-x64.bin
           
       - name: Set outputs
         id: vars
