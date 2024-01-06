@@ -1,9 +1,7 @@
 python2 -m nuitka --standalone --generate-c-only client.py
 
-gcc -o client.bin module.__main__.c
+cd client.build
 
-mkdir nuitka
-cp -r ~/.local/lib/python2.7/site-packages/nuitka/build/include/nuitka/* ./nuitka/.
-cp -r /usr/include/python2.7/* ./nuitka/.
+pwd=$(pwd)
 
-< > = it is looking for it in defined directories?
+gcc -o client.bin module.__main__.c -I$pwd -I$HOME/.local/lib/python2.7/site-packages/nuitka/build/include/ -I/usr/include/python2.7/ -I/usr/include/python2.7/
