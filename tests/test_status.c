@@ -161,6 +161,32 @@ static void test_utilities(void)
     stopping = 0;
 }
 
+static void test_portable_file_helpers(void)
+{
+    FILE *file = tmpfile();
+    CHECK(file != NULL);
+    if (file) {
+        CHECK(fputs("first line\nlast", file) >= 0);
+        rewind(file);
+        char *line = NULL;
+        size_t capacity = 0;
+        ssize_t length = read_stream_line(file, &line, &capacity);
+        CHECK(length == 11 && strcmp(line, "first line\n") == 0);
+        length = read_stream_line(file, &line, &capacity);
+        CHECK(length == 4 && strcmp(line, "last") == 0);
+        CHECK(read_stream_line(file, &line, &capacity) < 0);
+        free(line);
+        fclose(file);
+    }
+
+    errno = 0;
+    CHECK(read_stream_line(NULL, NULL, NULL) < 0 && errno == EINVAL);
+    CHECK(is_finite_number(0.0));
+    CHECK(is_finite_number(DBL_MAX) && is_finite_number(-DBL_MAX));
+    CHECK(!is_finite_number(strtod("nan", NULL)));
+    CHECK(!is_finite_number(strtod("inf", NULL)));
+}
+
 static void test_credentials(void)
 {
     char *path = temporary_file("# sample\n\naccount secret\nignored second line\n");
@@ -402,6 +428,9 @@ static void test_metric_functions(void)
     CHECK(read_memory(&memory_total, &memory_used, &swap_total, &swap_used) == 0);
     CHECK(memory_total > 0 && memory_used <= memory_total && swap_used <= swap_total);
 
+    double load;
+    CHECK(read_load_average(&load) == 0 && load >= 0.0);
+
     uint64_t disk_total, disk_used;
     CHECK(read_disk("/", &disk_total, &disk_used) == 0);
     CHECK(disk_total > 0 && disk_used <= disk_total);
@@ -503,6 +532,7 @@ static void test_main_entry(void)
 int main(void)
 {
     test_utilities();
+    test_portable_file_helpers();
     test_credentials();
     test_json_helpers();
     test_json_config();

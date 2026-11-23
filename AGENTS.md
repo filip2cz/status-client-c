@@ -17,7 +17,7 @@ The implementation is intentionally self-contained in `status.c`. It uses POSIX/
 * `README.md` documents setup and the three configuration modes.
 * `config.json.example` and `login.txt.example` are templates. Real `config.json` and `login.txt` files are ignored by Git because they contain credentials.
 
-There is no separate library layer or generated source. New dependencies can make one or more cross-compilers fail, so prefer libc/POSIX facilities already used in the program. Run the unit suite with `make test`; it builds an ignored `tests/test_status` executable. CI runs this suite before starting cross-compilation and release packaging.
+There is no separate library layer or generated source. New dependencies can make one or more cross-compilers fail, so prefer libc/POSIX facilities already used in the program. The legacy Blackfin uClibc toolchain lacks some newer libc APIs, so the source uses its own `read_stream_line`, checks finite doubles using `DBL_MAX`, and reads load average from `/proc/loadavg` instead of relying on `getline`, `isfinite`, or `getloadavg`. Run the unit suite with `make test`; it builds an ignored `tests/test_status` executable. CI runs this suite before starting cross-compilation and release packaging.
 
 The suite calls each production function from the included source file, including the renamed entry point, and covers parsers, validation failures, socket framing, authentication, metric calculations/reads, connectivity probes, and the update loop. It uses a child process for the handshake and a local alarm to stop the normally continuous sender loop. DNS for the probe hostnames is intercepted at link time and rewritten to loopback; keep these tests hermetic rather than allowing them to contact public hosts.
 
@@ -75,7 +75,7 @@ The family announced by the server tells the client which *other* address family
 | Wire fields | Source and calculation | Unit |
 | --- | --- | --- |
 | `uptime` | `sysinfo()` uptime | seconds |
-| `load` | first value from `getloadavg()` | load average |
+| `load` | first value from `/proc/loadavg` | load average |
 | `memory_total`, `memory_used` | `/proc/meminfo`; uses `MemAvailable`, or falls back to `MemFree + Buffers + Cached` | KiB |
 | `swap_total`, `swap_used` | `SwapTotal` and `SwapFree` from `/proc/meminfo` | KiB |
 | `hdd_total`, `hdd_used` | `statvfs()` for configured mountpoint, based on filesystem block counts | MiB |
@@ -89,10 +89,10 @@ CPU and network rates need a previous snapshot, so the first update after a conn
 
 `status.c` is organized in functional sections rather than separate translation units:
 
-* **Process utilities and config:** `handle_signal`, `log_message`, `usage`, `trim`, `load_credentials`, JSON parser helpers, `read_config_json`.
+* **Process utilities and config:** `handle_signal`, `log_message`, `usage`, `trim`, `read_stream_line`, `is_finite_number`, `load_credentials`, JSON parser helpers, `read_config_json`.
 * **Socket primitives:** `wait_fd`, `connect_one`, `connect_to_server`, `send_all`, `send_line`, `read_line`.
 * **Server handshake:** `authenticate`.
-* **Metric readers/calculations:** `read_cpu_counters`, `read_network_counters`, `read_memory`, `read_disk`, `cpu_percent`, `counter_rate`, `collect_metrics`.
+* **Metric readers/calculations:** `read_cpu_counters`, `read_network_counters`, `read_memory`, `read_disk`, `read_load_average`, `cpu_percent`, `counter_rate`, `collect_metrics`.
 * **Periodic status loop:** `probe_connect`, `monotonic_seconds`, `sleep_interval`, `send_updates`.
 * **Program entry and orchestration:** `main` selects the mode, validates the resulting `ProgramConfig`, and owns reconnect/cleanup.
 
@@ -107,6 +107,6 @@ Fallible file, configuration, and socket operations generally return `0` on succ
 * When changing metrics, document the source, units, first-sample behavior, and the exact ServerStatus wire key. Do not rename protocol fields casually.
 * When changing the handshake, verify compatibility with BotoX/ServerStatus' newline-delimited protocol and retain bounded socket waits, reconnect handling, and partial-write handling.
 * Keep credentials out of logs. The real credential files are ignored by Git; never replace those ignore rules with tracked secrets.
-* Keep code compatible with the compilers used by both `Makefile` and `.github/workflows/main.yml`. The workflow uses GNU C99 for legacy cross-toolchains while the local Makefile uses C11; avoid newer language features unless the Blackfin build is updated too.
+* Keep code compatible with the compilers and libc implementations used by both `Makefile` and `.github/workflows/main.yml`. The workflow uses GNU C99 and an older uClibc for Blackfin while the local Makefile uses C11; avoid libc APIs unavailable in that toolchain unless the Blackfin build is updated too.
 * Build with `make` and run `make test` after C changes. Tests are written in `tests/test_status.c`; the target uses GNU linker `--wrap=getaddrinfo` to keep probe tests local.
 

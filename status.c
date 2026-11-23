@@ -9,9 +9,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <float.h>
 #include <getopt.h>
 #include <inttypes.h>
-#include <math.h>
 #include <netdb.h>
 #include <poll.h>
 #include <stdarg.h>
@@ -145,6 +145,44 @@ static char *trim(char *text)
     return text;
 }
 
+static ssize_t read_stream_line(FILE *stream, char **line, size_t *capacity)
+{
+    if (!stream || !line || !capacity) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    size_t length = 0;
+    int character;
+    while ((character = fgetc(stream)) != EOF) {
+        if (length + 1 >= *capacity) {
+            size_t new_capacity = *capacity ? *capacity * 2 : 128;
+            if (new_capacity <= *capacity) {
+                errno = ENOMEM;
+                return -1;
+            }
+            char *new_line = realloc(*line, new_capacity);
+            if (!new_line)
+                return -1;
+            *line = new_line;
+            *capacity = new_capacity;
+        }
+        (*line)[length++] = (char)character;
+        if (character == '\n')
+            break;
+    }
+
+    if (length == 0)
+        return -1;
+    (*line)[length] = '\0';
+    return (ssize_t)length;
+}
+
+static bool is_finite_number(double value)
+{
+    return value >= -DBL_MAX && value <= DBL_MAX;
+}
+
 static int load_credentials(const char *path, Credentials *credentials)
 {
     FILE *file = fopen(path, "r");
@@ -157,7 +195,7 @@ static int load_credentials(const char *path, Credentials *credentials)
     size_t capacity = 0;
     ssize_t length;
     int result = -1;
-    while ((length = getline(&line, &capacity, file)) >= 0) {
+    while ((length = read_stream_line(file, &line, &capacity)) >= 0) {
         (void)length;
         char *value = trim(line);
         if (*value == '\0' || *value == '#')
@@ -364,7 +402,7 @@ static int json_number(JsonParser *parser, double *number)
     buffer[length] = '\0';
     char *end = NULL;
     *number = strtod(buffer, &end);
-    return end == buffer + length && isfinite(*number) ? 0 : -1;
+    return end == buffer + length && is_finite_number(*number) ? 0 : -1;
 }
 
 static int json_skip_value(JsonParser *parser)
@@ -744,7 +782,7 @@ static CpuCounters read_cpu_counters(void)
         return counters;
     char *line = NULL;
     size_t capacity = 0;
-    if (getline(&line, &capacity, file) < 0 || strncmp(line, "cpu ", 4) != 0) {
+    if (read_stream_line(file, &line, &capacity) < 0 || strncmp(line, "cpu ", 4) != 0) {
         free(line);
         fclose(file);
         return counters;
@@ -792,7 +830,7 @@ static NetworkCounters read_network_counters(void)
     size_t capacity = 0;
     unsigned line_number = 0;
     bool valid = true;
-    while (getline(&line, &capacity, file) >= 0) {
+    while (read_stream_line(file, &line, &capacity) >= 0) {
         if (line_number++ < 2)
             continue;
         char *colon = strrchr(line, ':');
@@ -837,7 +875,7 @@ static int read_memory(uint64_t *memory_total, uint64_t *memory_used,
     bool have_available = false;
     char *line = NULL;
     size_t capacity = 0;
-    while (getline(&line, &capacity, file) >= 0) {
+    while (read_stream_line(file, &line, &capacity) >= 0) {
         char key[64];
         unsigned long long value;
         if (sscanf(line, "%63[^:]: %llu", key, &value) != 2)
@@ -878,6 +916,20 @@ static int read_disk(const char *mountpoint, uint64_t *total_mb, uint64_t *used_
     return 0;
 }
 
+static int read_load_average(double *load)
+{
+    FILE *file = fopen("/proc/loadavg", "r");
+    if (!file)
+        return -1;
+    if (fscanf(file, "%lf", load) != 1) {
+        fclose(file);
+        errno = EIO;
+        return -1;
+    }
+    fclose(file);
+    return 0;
+}
+
 static double cpu_percent(CpuCounters previous, CpuCounters current)
 {
     if (!previous.valid || !current.valid || current.total <= previous.total)
@@ -907,12 +959,8 @@ static int collect_metrics(const char *mountpoint, CpuCounters previous_cpu,
         return -1;
     metrics->uptime = system.uptime < 0 ? 0 : (uint64_t)system.uptime;
 
-    double loads[3];
-    if (getloadavg(loads, 3) != 3) {
-        errno = EIO;
+    if (read_load_average(&metrics->load) < 0)
         return -1;
-    }
-    metrics->load = loads[0];
     if (read_memory(&metrics->memory_total, &metrics->memory_used,
                     &metrics->swap_total, &metrics->swap_used) < 0 ||
         read_disk(mountpoint, &metrics->disk_total, &metrics->disk_used) < 0)
@@ -1068,7 +1116,7 @@ int main(int argc, char **argv)
             char *end = NULL;
             errno = 0;
             config.interval = strtod(optarg, &end);
-            if (errno || end == optarg || *end != '\0' || !isfinite(config.interval) ||
+            if (errno || end == optarg || *end != '\0' || !is_finite_number(config.interval) ||
                 config.interval < 0.1 || config.interval > 3600.0) {
                 fprintf(stderr, "Invalid interval '%s' (expected 0.1..3600 seconds)\n", optarg);
                 return EXIT_FAILURE;
@@ -1153,7 +1201,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Host, mountpoint, username and password must be non-empty; credentials cannot contain line breaks or a colon in the username\n");
         return EXIT_FAILURE;
     }
-    if (!isfinite(config.interval) || config.interval < 0.1 || config.interval > 3600.0) {
+    if (!is_finite_number(config.interval) || config.interval < 0.1 || config.interval > 3600.0) {
         fprintf(stderr, "Invalid update interval (expected 0.1..3600 seconds)\n");
         return EXIT_FAILURE;
     }
