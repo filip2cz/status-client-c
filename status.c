@@ -524,11 +524,18 @@ static int wait_fd(int fd, short events, int timeout_ms)
     for (;;) {
         int result = poll(&descriptor, 1, timeout_ms);
         if (result > 0) {
-            if (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            if (descriptor.revents & POLLNVAL) {
+                errno = EBADF;
+                return -1;
+            }
+            /* Drain readable bytes before treating a peer's close as fatal. */
+            if (descriptor.revents & events)
+                return 0;
+            if (descriptor.revents & (POLLERR | POLLHUP)) {
                 errno = ECONNRESET;
                 return -1;
             }
-            return (descriptor.revents & events) ? 0 : -1;
+            return -1;
         }
         if (result == 0) {
             errno = ETIMEDOUT;
