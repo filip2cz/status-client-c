@@ -13,6 +13,8 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <netdb.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <signal.h>
@@ -21,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/statvfs.h>
 #include <sys/sysinfo.h>
@@ -39,6 +42,8 @@
 #define PROBE_TIMEOUT_MS 2000
 #define DISK_UNIT (1024ULL * 1024ULL)
 #define MAX_CONFIG_SIZE (64U * 1024U)
+#define MAX_ROUTE_INTERFACES 16
+#define NETWORK_INTERFACE_NAME_SIZE 16
 
 typedef struct {
     char username[256];
@@ -78,6 +83,18 @@ typedef struct {
     uint64_t tx;
     bool valid;
 } NetworkCounters;
+
+typedef struct {
+    char names[MAX_ROUTE_INTERFACES][NETWORK_INTERFACE_NAME_SIZE];
+    size_t count;
+    unsigned long best_metric;
+    bool have_metric;
+} RouteInterfaceList;
+
+typedef struct {
+    RouteInterfaceList ipv4;
+    RouteInterfaceList ipv6;
+} NetworkRouteInterfaces;
 
 typedef struct {
     uint64_t uptime;
@@ -857,13 +874,254 @@ static CpuCounters read_cpu_counters(void)
     return counters;
 }
 
-static NetworkCounters read_network_counters(void)
+static void route_interface_add(RouteInterfaceList *interfaces,
+                                const char *name, unsigned long metric)
+{
+    if (!interfaces->have_metric || metric < interfaces->best_metric) {
+        interfaces->count = 0;
+        interfaces->best_metric = metric;
+        interfaces->have_metric = true;
+    } else if (metric > interfaces->best_metric) {
+        return;
+    }
+
+    for (size_t i = 0; i < interfaces->count; ++i) {
+        if (strcmp(interfaces->names[i], name) == 0)
+            return;
+    }
+    if (interfaces->count < MAX_ROUTE_INTERFACES) {
+        strncpy(interfaces->names[interfaces->count], name, NETWORK_INTERFACE_NAME_SIZE - 1);
+        interfaces->names[interfaces->count][NETWORK_INTERFACE_NAME_SIZE - 1] = '\0';
+        ++interfaces->count;
+    }
+}
+
+static int read_ipv4_default_routes(FILE *file, RouteInterfaceList *interfaces)
+{
+    char *line = NULL;
+    size_t capacity = 0;
+    while (read_stream_line(file, &line, &capacity) >= 0) {
+        char name[NETWORK_INTERFACE_NAME_SIZE];
+        unsigned long destination, gateway, metric, mask;
+        unsigned flags;
+        int parsed = sscanf(line, "%15s %lx %lx %x %*u %*u %lu %lx",
+                            name, &destination, &gateway, &flags, &metric, &mask);
+        (void)gateway;
+        if (parsed == 6 && destination == 0 && mask == 0 && (flags & 0x1U))
+            route_interface_add(interfaces, name, metric);
+    }
+    free(line);
+    return 0;
+}
+
+static bool is_zero_ipv6_address(const char *address)
+{
+    if (strlen(address) != 32)
+        return false;
+    for (size_t i = 0; i < 32; ++i) {
+        if (address[i] != '0')
+            return false;
+    }
+    return true;
+}
+
+static int read_ipv6_default_routes(FILE *file, RouteInterfaceList *interfaces)
+{
+    char *line = NULL;
+    size_t capacity = 0;
+    while (read_stream_line(file, &line, &capacity) >= 0) {
+        char destination[33], source[33], gateway[33];
+        char name[NETWORK_INTERFACE_NAME_SIZE];
+        unsigned destination_prefix, source_prefix, references, use, flags;
+        unsigned long metric;
+        int parsed = sscanf(line, "%32s %x %32s %x %32s %lx %x %x %x %15s",
+                            destination, &destination_prefix, source, &source_prefix,
+                            gateway, &metric, &references, &use, &flags, name);
+        (void)source;
+        (void)source_prefix;
+        (void)gateway;
+        (void)references;
+        (void)use;
+        if (parsed == 10 && destination_prefix == 0 &&
+            is_zero_ipv6_address(destination) && (flags & 0x1U))
+            route_interface_add(interfaces, name, metric);
+    }
+    free(line);
+    return 0;
+}
+
+static bool route_interfaces_contains(const NetworkRouteInterfaces *routes, const char *name)
+{
+    const RouteInterfaceList *lists[] = {&routes->ipv4, &routes->ipv6};
+    for (size_t list = 0; list < sizeof(lists) / sizeof(lists[0]); ++list) {
+        for (size_t i = 0; i < lists[list]->count; ++i) {
+            if (strcmp(lists[list]->names[i], name) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool read_network_route_interfaces(NetworkRouteInterfaces *routes)
+{
+    memset(routes, 0, sizeof(*routes));
+    FILE *ipv4 = fopen("/proc/net/route", "r");
+    if (ipv4) {
+        read_ipv4_default_routes(ipv4, &routes->ipv4);
+        fclose(ipv4);
+    }
+    FILE *ipv6 = fopen("/proc/net/ipv6_route", "r");
+    if (ipv6) {
+        read_ipv6_default_routes(ipv6, &routes->ipv6);
+        fclose(ipv6);
+    }
+    return routes->ipv4.count > 0 || routes->ipv6.count > 0;
+}
+
+static int copy_interface_name(char *destination, size_t capacity, const char *source)
+{
+    size_t length = strlen(source);
+    if (length >= capacity) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(destination, source, length + 1);
+    return 0;
+}
+
+static int connected_ipv4_interface(const struct in_addr *address,
+                                    char *name, size_t name_capacity)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return -1;
+
+    size_t capacity = 4096;
+    const size_t maximum_capacity = 1024U * 1024U;
+    int result = -1;
+    int saved_errno = ENODEV;
+    for (;;) {
+        char *buffer = malloc(capacity);
+        if (!buffer) {
+            saved_errno = errno;
+            break;
+        }
+        struct ifconf configuration;
+        configuration.ifc_len = (int)capacity;
+        configuration.ifc_buf = buffer;
+        if (ioctl(fd, SIOCGIFCONF, &configuration) < 0) {
+            saved_errno = errno;
+            free(buffer);
+            break;
+        }
+
+        bool found = false;
+        for (int offset = 0; offset + (int)sizeof(struct ifreq) <= configuration.ifc_len;
+             offset += (int)sizeof(struct ifreq)) {
+            struct ifreq *request = (struct ifreq *)(buffer + offset);
+            if (request->ifr_addr.sa_family != AF_INET)
+                continue;
+            struct sockaddr_in *interface_address = (struct sockaddr_in *)&request->ifr_addr;
+            if (interface_address->sin_addr.s_addr != address->s_addr)
+                continue;
+            result = copy_interface_name(name, name_capacity, request->ifr_name);
+            saved_errno = errno;
+            found = true;
+            break;
+        }
+
+        bool possibly_truncated =
+            configuration.ifc_len + (int)sizeof(struct ifreq) >= (int)capacity;
+        free(buffer);
+        if (found)
+            break;
+        if (!possibly_truncated || capacity >= maximum_capacity)
+            break;
+        capacity *= 2;
+    }
+    close(fd);
+    if (result < 0)
+        errno = saved_errno;
+    return result;
+}
+
+static int connected_ipv6_interface(const struct in6_addr *address, uint32_t scope_id,
+                                    char *name, size_t name_capacity)
+{
+    FILE *file = fopen("/proc/net/if_inet6", "r");
+    if (!file)
+        return -1;
+
+    char *line = NULL;
+    size_t capacity = 0;
+    int result = -1;
+    int saved_errno = ENODEV;
+    while (read_stream_line(file, &line, &capacity) >= 0) {
+        char address_text[33], interface_name[NETWORK_INTERFACE_NAME_SIZE];
+        unsigned interface_index, prefix_length, address_scope, flags;
+        if (sscanf(line, "%32s %x %x %x %x %15s", address_text, &interface_index,
+                   &prefix_length, &address_scope, &flags, interface_name) != 6)
+            continue;
+        (void)prefix_length;
+        (void)address_scope;
+        (void)flags;
+        if (strlen(address_text) != 32 ||
+            (IN6_IS_ADDR_LINKLOCAL(address) && scope_id != 0 && interface_index != scope_id))
+            continue;
+        unsigned char bytes[16];
+        bool valid_address = true;
+        for (size_t i = 0; i < sizeof(bytes); ++i) {
+            unsigned value;
+            char pair[3] = {address_text[i * 2], address_text[i * 2 + 1], '\0'};
+            if (sscanf(pair, "%2x", &value) != 1) {
+                valid_address = false;
+                break;
+            }
+            bytes[i] = (unsigned char)value;
+        }
+        if (!valid_address || memcmp(bytes, address, sizeof(bytes)) != 0)
+            continue;
+        result = copy_interface_name(name, name_capacity, interface_name);
+        saved_errno = errno;
+        break;
+    }
+    free(line);
+    fclose(file);
+    if (result < 0)
+        errno = saved_errno;
+    return result;
+}
+
+static int connected_socket_interface(int fd, char *name, size_t name_capacity)
+{
+    struct sockaddr_storage local_address;
+    socklen_t address_length = sizeof(local_address);
+    if (getsockname(fd, (struct sockaddr *)&local_address, &address_length) < 0)
+        return -1;
+    if (local_address.ss_family == AF_INET) {
+        const struct sockaddr_in *ipv4 = (const struct sockaddr_in *)&local_address;
+        return connected_ipv4_interface(&ipv4->sin_addr, name, name_capacity);
+    }
+    if (local_address.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *ipv6 = (const struct sockaddr_in6 *)&local_address;
+        if (IN6_IS_ADDR_V4MAPPED(&ipv6->sin6_addr)) {
+            struct in_addr mapped_address;
+            memcpy(&mapped_address.s_addr, &ipv6->sin6_addr.s6_addr[12],
+                   sizeof(mapped_address.s_addr));
+            return connected_ipv4_interface(&mapped_address, name, name_capacity);
+        }
+        return connected_ipv6_interface(&ipv6->sin6_addr, ipv6->sin6_scope_id,
+                                        name, name_capacity);
+    }
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+
+static NetworkCounters read_network_counters_from_stream(
+    FILE *file, const NetworkRouteInterfaces *routes, bool use_default_routes,
+    const char *selected_interface)
 {
     NetworkCounters counters = {0};
-    FILE *file = fopen("/proc/net/dev", "r");
-    if (!file)
-        return counters;
-
     char *line = NULL;
     size_t capacity = 0;
     unsigned line_number = 0;
@@ -878,9 +1136,16 @@ static NetworkCounters read_network_counters(void)
         }
         *colon = '\0';
         char *name = trim(line);
-        if (strcmp(name, "lo") == 0 || strncmp(name, "tun", 3) == 0)
+        if (selected_interface && selected_interface[0]) {
+            if (strcmp(name, selected_interface) != 0)
+                continue;
+        } else if (use_default_routes) {
+            if (!route_interfaces_contains(routes, name))
+                continue;
+        } else if (strcmp(name, "lo") == 0 || strncmp(name, "tun", 3) == 0) {
             continue;
-        unsigned long long rx = 0, tx = 0;
+        }
+
         unsigned long long fields[16];
         int parsed = sscanf(colon + 1,
                             "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
@@ -891,14 +1156,26 @@ static NetworkCounters read_network_counters(void)
             valid = false;
             break;
         }
-        rx = fields[0];
-        tx = fields[8];
-        counters.rx += (uint64_t)rx;
-        counters.tx += (uint64_t)tx;
+        counters.rx += (uint64_t)fields[0];
+        counters.tx += (uint64_t)fields[8];
     }
     free(line);
-    fclose(file);
     counters.valid = valid;
+    return counters;
+}
+
+static NetworkCounters read_network_counters(const char *selected_interface)
+{
+    NetworkCounters counters = {0};
+    FILE *file = fopen("/proc/net/dev", "r");
+    if (!file)
+        return counters;
+
+    NetworkRouteInterfaces routes;
+    bool use_default_routes = read_network_route_interfaces(&routes);
+    counters = read_network_counters_from_stream(file, &routes, use_default_routes,
+                                                 selected_interface);
+    fclose(file);
     return counters;
 }
 
@@ -987,7 +1264,8 @@ static uint64_t counter_rate(uint64_t previous, uint64_t current, double elapsed
     return rate >= (double)UINT64_MAX ? UINT64_MAX : (uint64_t)rate;
 }
 
-static int collect_metrics(const char *mountpoint, CpuCounters previous_cpu,
+static int collect_metrics(const char *mountpoint, const char *network_interface,
+                           CpuCounters previous_cpu,
                            NetworkCounters previous_network, double elapsed,
                            Metrics *metrics, CpuCounters *current_cpu,
                            NetworkCounters *current_network)
@@ -1006,7 +1284,7 @@ static int collect_metrics(const char *mountpoint, CpuCounters previous_cpu,
 
     *current_cpu = read_cpu_counters();
     metrics->cpu = cpu_percent(previous_cpu, *current_cpu);
-    *current_network = read_network_counters();
+    *current_network = read_network_counters(network_interface);
     metrics->network_rx = previous_network.valid && current_network->valid
         ? counter_rate(previous_network.rx, current_network->rx, elapsed) : 0;
     metrics->network_tx = previous_network.valid && current_network->valid
@@ -1057,8 +1335,15 @@ static void sleep_interval(double seconds)
 
 static int send_updates(int fd, const char *mountpoint, int probe_family, double interval)
 {
+    char network_interface[NETWORK_INTERFACE_NAME_SIZE];
+    const char *selected_network_interface = NULL;
+    if (connected_socket_interface(fd, network_interface, sizeof(network_interface)) == 0) {
+        selected_network_interface = network_interface;
+        log_message("Measuring network usage on interface %s", network_interface);
+    }
+
     CpuCounters previous_cpu = read_cpu_counters();
-    NetworkCounters previous_network = read_network_counters();
+    NetworkCounters previous_network = read_network_counters(selected_network_interface);
     double previous_time = monotonic_seconds();
     double next_probe = previous_time;
     int online = 0;
@@ -1074,13 +1359,15 @@ static int send_updates(int fd, const char *mountpoint, int probe_family, double
             next_probe = monotonic_seconds() + 10.0;
         }
 
+        double rate_sample_time = monotonic_seconds();
         Metrics metrics = {0};
         CpuCounters current_cpu;
         NetworkCounters current_network;
-        double elapsed = now - previous_time;
+        double elapsed = rate_sample_time - previous_time;
         if (elapsed <= 0.0)
             elapsed = interval;
-        if (collect_metrics(mountpoint, previous_cpu, previous_network, elapsed,
+        if (collect_metrics(mountpoint, selected_network_interface, previous_cpu,
+                            previous_network, elapsed,
                             &metrics, &current_cpu, &current_network) < 0) {
             fprintf(stderr, "Cannot collect system metrics: %s\n", strerror(errno));
             return -1;

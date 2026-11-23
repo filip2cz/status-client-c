@@ -366,6 +366,13 @@ static void test_connect_functions(void)
     CHECK(fd >= 0);
     int accepted = fd >= 0 ? accept(listener, NULL, NULL) : -1;
     CHECK(accepted >= 0);
+    char interface_name[NETWORK_INTERFACE_NAME_SIZE];
+    CHECK(fd >= 0 && connected_socket_interface(fd, interface_name, sizeof(interface_name)) == 0 &&
+          strcmp(interface_name, "lo") == 0);
+    struct in6_addr ipv6_loopback = IN6ADDR_LOOPBACK_INIT;
+    CHECK(connected_ipv6_interface(&ipv6_loopback, 0, interface_name,
+                                  sizeof(interface_name)) == 0 &&
+          strcmp(interface_name, "lo") == 0);
     if (fd >= 0) close(fd);
     if (accepted >= 0) close(accepted);
 
@@ -474,9 +481,63 @@ static void test_metric_functions(void)
     CHECK(counter_rate(300, 100, 2.0) == 0);
     CHECK(counter_rate(1, 2, 0.0) == 0);
 
+    NetworkRouteInterfaces routes = {0};
+    FILE *route_file = tmpfile();
+    CHECK(route_file != NULL);
+    if (route_file) {
+        fputs("Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+              "wlo1 00000000 011FA8C0 0003 0 0 600 00000000 0 0 0\n"
+              "eth0 00000000 0100000A 0003 0 0 100 00000000 0 0 0\n"
+              "eth1 00000000 0100000A 0003 0 0 100 00000000 0 0 0\n"
+              "virbr0 007AA8C0 00000000 0001 0 0 0 00FFFFFF 0 0 0\n", route_file);
+        rewind(route_file);
+        CHECK(read_ipv4_default_routes(route_file, &routes.ipv4) == 0);
+        CHECK(routes.ipv4.count == 2);
+        CHECK(strcmp(routes.ipv4.names[0], "eth0") == 0);
+        CHECK(strcmp(routes.ipv4.names[1], "eth1") == 0);
+        fclose(route_file);
+    }
+
+    route_file = tmpfile();
+    CHECK(route_file != NULL);
+    if (route_file) {
+        fputs("fe800000000000000000000000000000 40 00000000000000000000000000000000 00 "
+              "00000000000000000000000000000000 00000100 00000001 00000000 00000001 wlo1\n"
+              "00000000000000000000000000000000 00 00000000000000000000000000000000 00 "
+              "00000000000000000000000000000000 00000010 00000000 00000000 00000001 wlo1\n",
+              route_file);
+        rewind(route_file);
+        CHECK(read_ipv6_default_routes(route_file, &routes.ipv6) == 0);
+        CHECK(routes.ipv6.count == 1 && strcmp(routes.ipv6.names[0], "wlo1") == 0);
+        fclose(route_file);
+    }
+    CHECK(route_interfaces_contains(&routes, "eth0"));
+    CHECK(route_interfaces_contains(&routes, "eth1"));
+    CHECK(route_interfaces_contains(&routes, "wlo1"));
+    CHECK(!route_interfaces_contains(&routes, "virbr0"));
+
+    FILE *device_file = tmpfile();
+    CHECK(device_file != NULL);
+    if (device_file) {
+        fputs("Inter-| Receive | Transmit\n"
+              " face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n"
+              "eth0: 100 1 0 0 0 0 0 0 200 2 0 0 0 0 0 0\n"
+              "eth1: 300 3 0 0 0 0 0 0 400 4 0 0 0 0 0 0\n"
+              "wlo1: 500 5 0 0 0 0 0 0 600 6 0 0 0 0 0 0\n"
+              "virbr0: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0\n"
+              "lo: 9000 90 0 0 0 0 0 0 9000 90 0 0 0 0 0 0\n", device_file);
+        rewind(device_file);
+        NetworkCounters filtered = read_network_counters_from_stream(device_file, &routes, true, NULL);
+        CHECK(filtered.valid && filtered.rx == 900 && filtered.tx == 1200);
+        rewind(device_file);
+        filtered = read_network_counters_from_stream(device_file, &routes, true, "wlo1");
+        CHECK(filtered.valid && filtered.rx == 500 && filtered.tx == 600);
+        fclose(device_file);
+    }
+
     CpuCounters cpu = read_cpu_counters();
     CHECK(cpu.valid && cpu.total > 0);
-    NetworkCounters network = read_network_counters();
+    NetworkCounters network = read_network_counters(NULL);
     CHECK(network.valid);
 
     uint64_t memory_total, memory_used, swap_total, swap_used;
@@ -494,7 +555,8 @@ static void test_metric_functions(void)
     Metrics metrics = {0};
     CpuCounters cpu_after;
     NetworkCounters network_after;
-    CHECK(collect_metrics("/", cpu, network, 1.0, &metrics, &cpu_after, &network_after) == 0);
+    CHECK(collect_metrics("/", NULL, cpu, network, 1.0,
+                          &metrics, &cpu_after, &network_after) == 0);
     CHECK(metrics.uptime > 0 && metrics.memory_total > 0 && metrics.disk_total > 0);
     CHECK(metrics.load >= 0.0);
 }

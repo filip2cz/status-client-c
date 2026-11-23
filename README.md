@@ -88,7 +88,7 @@ The client reads `login.txt` from its current working directory. The file contai
 * `-q, --quiet` — suppress routine connection messages
 * `-h, --help` — show help
 
-Memory values use KiB, disk values use MiB, and network values are bytes per second. CPU usage comes from `/proc/stat`; network traffic is summed across interfaces except loopback and `tun*`. The client periodically checks IPv4 or IPv6 connectivity as requested by ServerStatus. It requires Linux procfs and standard POSIX socket and filesystem interfaces.
+Memory values use KiB, disk values use MiB, and network values are bytes per second. CPU usage comes from `/proc/stat`. Network rates use the interface matching the local address of the active ServerStatus connection. If that interface cannot be identified, the client falls back to interfaces on the lowest-metric IPv4 or IPv6 default routes; if no default route is available, it sums interfaces except loopback and `tun*`. The client periodically checks IPv4 or IPv6 connectivity as requested by ServerStatus. It requires Linux procfs and standard POSIX socket and filesystem interfaces.
 
 Stop the client with `Ctrl-C` or `SIGTERM`.
 
