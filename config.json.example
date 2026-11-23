@@ -1,0 +1,9 @@
+{
+  "host": "status.example.net",
+  "port": 35601,
+  "username": "server_username",
+  "password": "server_password",
+  "interval": 1,
+  "mountpoint": "/",
+  "quiet": false
+}

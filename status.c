@@ -32,11 +32,28 @@
 #define IO_TIMEOUT_MS 30000
 #define PROBE_TIMEOUT_MS 2000
 #define DISK_UNIT (1024ULL * 1024ULL)
+#define MAX_CONFIG_SIZE (64U * 1024U)
 
 typedef struct {
     char username[256];
     char password[256];
 } Credentials;
+
+typedef struct {
+    char host[1024];
+    char port[6];
+    Credentials credentials;
+    double interval;
+    char mountpoint[4096];
+    bool quiet;
+} ProgramConfig;
+
+typedef struct {
+    const char *text;
+    size_t length;
+    size_t position;
+    unsigned depth;
+} JsonParser;
 
 typedef struct {
     char data[MAX_LINE];
@@ -93,14 +110,22 @@ static void log_message(const char *format, ...)
 static void usage(FILE *stream, const char *program)
 {
     fprintf(stream,
-            "Usage: %s [options] host port\n"
+            "Usage modes:\n"
+            "  %s --config FILE\n"
+            "  %s --host HOST --port PORT --username USER --password PASS [options]\n"
+            "  %s [options] host port   (legacy mode; reads %s)\n"
             "Options:\n"
-            "  -c, --credentials FILE  Credentials file (default: %s)\n"
+            "  -c, --config FILE       JSON configuration (all settings)\n"
+            "  -H, --host HOST         Server hostname or address\n"
+            "  -p, --port PORT         Server TCP port\n"
+            "  -u, --username USER     ServerStatus username\n"
+            "      --password PASS     ServerStatus password\n"
+            "  -C, --credentials FILE  Legacy credentials file\n"
             "  -i, --interval SECONDS  Update interval, 0.1 to 3600 (default: 1)\n"
             "  -m, --mountpoint PATH   Filesystem to report (default: /)\n"
             "  -q, --quiet             Suppress status messages\n"
             "  -h, --help              Show this help\n",
-            program, DEFAULT_CREDENTIALS);
+            program, program, program, DEFAULT_CREDENTIALS);
 }
 
 static char *trim(char *text)
@@ -158,6 +183,333 @@ static int load_credentials(const char *path, Credentials *credentials)
     if (result != 0)
         fprintf(stderr, "Invalid credentials in '%s'; expected: username password\n", path);
     return result;
+}
+
+static void json_space(JsonParser *parser)
+{
+    while (parser->position < parser->length &&
+           (parser->text[parser->position] == ' ' || parser->text[parser->position] == '\t' ||
+            parser->text[parser->position] == '\r' || parser->text[parser->position] == '\n'))
+        ++parser->position;
+}
+
+static int json_hex4(JsonParser *parser, uint32_t *value)
+{
+    if (parser->length - parser->position < 4)
+        return -1;
+    uint32_t result = 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        char c = parser->text[parser->position++];
+        unsigned digit;
+        if (c >= '0' && c <= '9') digit = (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') digit = (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') digit = (unsigned)(c - 'A' + 10);
+        else return -1;
+        result = result * 16 + digit;
+    }
+    *value = result;
+    return 0;
+}
+
+static int json_append_codepoint(char *output, size_t capacity, size_t *used, uint32_t cp)
+{
+    unsigned char bytes[4];
+    size_t count;
+    if (cp == 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+        return -1;
+    if (cp <= 0x7f) {
+        bytes[0] = (unsigned char)cp; count = 1;
+    } else if (cp <= 0x7ff) {
+        bytes[0] = (unsigned char)(0xc0 | (cp >> 6));
+        bytes[1] = (unsigned char)(0x80 | (cp & 0x3f)); count = 2;
+    } else if (cp <= 0xffff) {
+        bytes[0] = (unsigned char)(0xe0 | (cp >> 12));
+        bytes[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3f));
+        bytes[2] = (unsigned char)(0x80 | (cp & 0x3f)); count = 3;
+    } else {
+        bytes[0] = (unsigned char)(0xf0 | (cp >> 18));
+        bytes[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3f));
+        bytes[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3f));
+        bytes[3] = (unsigned char)(0x80 | (cp & 0x3f)); count = 4;
+    }
+    if (*used + count >= capacity)
+        return -1;
+    memcpy(output + *used, bytes, count);
+    *used += count;
+    return 0;
+}
+
+static int json_string(JsonParser *parser, char *output, size_t capacity)
+{
+    if (capacity == 0 || parser->position >= parser->length ||
+        parser->text[parser->position++] != '"')
+        return -1;
+    size_t used = 0;
+    while (parser->position < parser->length) {
+        unsigned char c = (unsigned char)parser->text[parser->position++];
+        if (c == '"') {
+            output[used] = '\0';
+            return 0;
+        }
+        if (c < 0x20)
+            return -1;
+        if (c == '\\') {
+            if (parser->position >= parser->length)
+                return -1;
+            c = (unsigned char)parser->text[parser->position++];
+            switch (c) {
+            case '"': case '\\': case '/':
+                if (used + 1 >= capacity) return -1;
+                output[used++] = (char)c;
+                break;
+            case 'b': if (used + 1 >= capacity) return -1; output[used++] = '\b'; break;
+            case 'f': if (used + 1 >= capacity) return -1; output[used++] = '\f'; break;
+            case 'n': if (used + 1 >= capacity) return -1; output[used++] = '\n'; break;
+            case 'r': if (used + 1 >= capacity) return -1; output[used++] = '\r'; break;
+            case 't': if (used + 1 >= capacity) return -1; output[used++] = '\t'; break;
+            case 'u': {
+                uint32_t cp;
+                if (json_hex4(parser, &cp) < 0)
+                    return -1;
+                if (cp >= 0xd800 && cp <= 0xdbff) {
+                    if (parser->length - parser->position < 6 ||
+                        parser->text[parser->position] != '\\' ||
+                        parser->text[parser->position + 1] != 'u')
+                        return -1;
+                    parser->position += 2;
+                    uint32_t low;
+                    if (json_hex4(parser, &low) < 0 || low < 0xdc00 || low > 0xdfff)
+                        return -1;
+                    cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+                }
+                if (json_append_codepoint(output, capacity, &used, cp) < 0)
+                    return -1;
+                break;
+            }
+            default: return -1;
+            }
+        } else {
+            if (used + 1 >= capacity)
+                return -1;
+            output[used++] = (char)c;
+        }
+    }
+    return -1;
+}
+
+static int json_skip_string(JsonParser *parser)
+{
+    if (parser->position >= parser->length || parser->text[parser->position++] != '"')
+        return -1;
+    while (parser->position < parser->length) {
+        unsigned char c = (unsigned char)parser->text[parser->position++];
+        if (c == '"') return 0;
+        if (c < 0x20) return -1;
+        if (c == '\\') {
+            if (parser->position >= parser->length) return -1;
+            c = (unsigned char)parser->text[parser->position++];
+            if (c == 'u') {
+                uint32_t ignored;
+                if (json_hex4(parser, &ignored) < 0) return -1;
+            } else if (c != '"' && c != '\\' && c != '/' && c != 'b' && c != 'f' &&
+                       c != 'n' && c != 'r' && c != 't') return -1;
+        }
+    }
+    return -1;
+}
+
+static int json_number(JsonParser *parser, double *number)
+{
+    size_t start = parser->position;
+    if (parser->position < parser->length && parser->text[parser->position] == '-')
+        ++parser->position;
+    if (parser->position >= parser->length) return -1;
+    if (parser->text[parser->position] == '0') {
+        ++parser->position;
+        if (parser->position < parser->length && parser->text[parser->position] >= '0' &&
+            parser->text[parser->position] <= '9') return -1;
+    } else {
+        if (parser->text[parser->position] < '1' || parser->text[parser->position] > '9') return -1;
+        while (parser->position < parser->length && parser->text[parser->position] >= '0' &&
+               parser->text[parser->position] <= '9') ++parser->position;
+    }
+    if (parser->position < parser->length && parser->text[parser->position] == '.') {
+        ++parser->position;
+        size_t fraction_start = parser->position;
+        while (parser->position < parser->length && parser->text[parser->position] >= '0' &&
+               parser->text[parser->position] <= '9') ++parser->position;
+        if (fraction_start == parser->position) return -1;
+    }
+    if (parser->position < parser->length &&
+        (parser->text[parser->position] == 'e' || parser->text[parser->position] == 'E')) {
+        ++parser->position;
+        if (parser->position < parser->length &&
+            (parser->text[parser->position] == '+' || parser->text[parser->position] == '-'))
+            ++parser->position;
+        size_t exponent_start = parser->position;
+        while (parser->position < parser->length && parser->text[parser->position] >= '0' &&
+               parser->text[parser->position] <= '9') ++parser->position;
+        if (exponent_start == parser->position) return -1;
+    }
+    size_t length = parser->position - start;
+    if (length >= 128) return -1;
+    char buffer[128];
+    memcpy(buffer, parser->text + start, length);
+    buffer[length] = '\0';
+    char *end = NULL;
+    *number = strtod(buffer, &end);
+    return end == buffer + length && isfinite(*number) ? 0 : -1;
+}
+
+static int json_skip_value(JsonParser *parser)
+{
+    json_space(parser);
+    if (parser->position >= parser->length || parser->depth >= 32)
+        return -1;
+    char c = parser->text[parser->position];
+    if (c == '"') return json_skip_string(parser);
+    if (c == '{' || c == '[') {
+        char close = c == '{' ? '}' : ']';
+        ++parser->position;
+        ++parser->depth;
+        json_space(parser);
+        if (parser->position < parser->length && parser->text[parser->position] == close) {
+            ++parser->position;
+            --parser->depth;
+            return 0;
+        }
+        for (;;) {
+            if (c == '{') {
+                if (json_skip_string(parser) < 0) { --parser->depth; return -1; }
+                json_space(parser);
+                if (parser->position >= parser->length || parser->text[parser->position++] != ':') {
+                    --parser->depth; return -1;
+                }
+            }
+            if (json_skip_value(parser) < 0) { --parser->depth; return -1; }
+            json_space(parser);
+            if (parser->position >= parser->length) { --parser->depth; return -1; }
+            char separator = parser->text[parser->position++];
+            if (separator == close) break;
+            if (separator != ',') { --parser->depth; return -1; }
+            json_space(parser);
+        }
+        --parser->depth;
+        return 0;
+    }
+    double ignored;
+    if (c == '-' || (c >= '0' && c <= '9'))
+        return json_number(parser, &ignored);
+    const char *literals[] = {"true", "false", "null"};
+    for (size_t i = 0; i < sizeof(literals) / sizeof(literals[0]); ++i) {
+        size_t n = strlen(literals[i]);
+        if (parser->length - parser->position >= n &&
+            memcmp(parser->text + parser->position, literals[i], n) == 0) {
+            parser->position += n;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int json_boolean(JsonParser *parser, bool *value)
+{
+    if (parser->length - parser->position >= 4 &&
+        memcmp(parser->text + parser->position, "true", 4) == 0) {
+        parser->position += 4; *value = true; return 0;
+    }
+    if (parser->length - parser->position >= 5 &&
+        memcmp(parser->text + parser->position, "false", 5) == 0) {
+        parser->position += 5; *value = false; return 0;
+    }
+    return -1;
+}
+
+static int read_config_json(const char *path, ProgramConfig *config)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "Cannot open JSON configuration '%s': %s\n", path, strerror(errno));
+        return -1;
+    }
+    char *text = malloc(MAX_CONFIG_SIZE + 1);
+    if (!text) { fclose(file); return -1; }
+    size_t length = fread(text, 1, MAX_CONFIG_SIZE + 1, file);
+    bool too_large = length > MAX_CONFIG_SIZE;
+    bool read_error = ferror(file);
+    fclose(file);
+    if (too_large || read_error) {
+        fprintf(stderr, "Cannot read JSON configuration '%s' (maximum size is %u bytes)\n",
+                path, MAX_CONFIG_SIZE);
+        free(text);
+        return -1;
+    }
+    text[length] = '\0';
+    JsonParser parser = {.text = text, .length = length};
+    unsigned seen = 0;
+    json_space(&parser);
+    if (parser.position >= parser.length || text[parser.position++] != '{')
+        goto invalid_json;
+    json_space(&parser);
+    if (parser.position < parser.length && text[parser.position] == '}')
+        goto invalid_json;
+    for (;;) {
+        char key[128];
+        if (json_string(&parser, key, sizeof(key)) < 0) goto invalid_json;
+        json_space(&parser);
+        if (parser.position >= parser.length || text[parser.position++] != ':') goto invalid_json;
+        json_space(&parser);
+        unsigned bit = 0;
+        if (strcmp(key, "host") == 0) {
+            bit = 1U << 0;
+            if (json_string(&parser, config->host, sizeof(config->host)) < 0) goto invalid_json;
+        } else if (strcmp(key, "port") == 0) {
+            double value;
+            bit = 1U << 1;
+            if (json_number(&parser, &value) < 0 || value < 1 || value > 65535 ||
+                value != (double)(long)value) goto invalid_json;
+            snprintf(config->port, sizeof(config->port), "%ld", (long)value);
+        } else if (strcmp(key, "username") == 0) {
+            bit = 1U << 2;
+            if (json_string(&parser, config->credentials.username,
+                            sizeof(config->credentials.username)) < 0) goto invalid_json;
+        } else if (strcmp(key, "password") == 0) {
+            bit = 1U << 3;
+            if (json_string(&parser, config->credentials.password,
+                            sizeof(config->credentials.password)) < 0) goto invalid_json;
+        } else if (strcmp(key, "interval") == 0) {
+            bit = 1U << 4;
+            if (json_number(&parser, &config->interval) < 0) goto invalid_json;
+        } else if (strcmp(key, "mountpoint") == 0) {
+            bit = 1U << 5;
+            if (json_string(&parser, config->mountpoint, sizeof(config->mountpoint)) < 0) goto invalid_json;
+        } else if (strcmp(key, "quiet") == 0) {
+            bit = 1U << 6;
+            if (json_boolean(&parser, &config->quiet) < 0) goto invalid_json;
+        } else if (json_skip_value(&parser) < 0) {
+            goto invalid_json;
+        }
+        if (bit && (seen & bit)) goto invalid_json;
+        seen |= bit;
+        json_space(&parser);
+        if (parser.position >= parser.length) goto invalid_json;
+        char separator = text[parser.position++];
+        if (separator == '}') break;
+        if (separator != ',') goto invalid_json;
+        json_space(&parser);
+    }
+    json_space(&parser);
+    free(text);
+    if (parser.position != parser.length || seen != 0x7f) {
+        fprintf(stderr, "JSON config must contain host, port, username, password, interval, mountpoint, and quiet\n");
+        return -1;
+    }
+    return 0;
+
+invalid_json:
+    free(text);
+    fprintf(stderr, "Invalid JSON configuration '%s' near byte %zu\n", path, parser.position);
+    return -1;
 }
 
 static int wait_fd(int fd, short events, int timeout_ms)
@@ -665,10 +1017,24 @@ static int send_updates(int fd, const char *mountpoint, int probe_family, double
 int main(int argc, char **argv)
 {
     const char *credentials_path = DEFAULT_CREDENTIALS;
-    const char *mountpoint = "/";
-    double interval = DEFAULT_INTERVAL;
+    const char *config_path = NULL;
+    const char *host_argument = NULL;
+    const char *port_argument = NULL;
+    const char *username_argument = NULL;
+    const char *password_argument = NULL;
+    ProgramConfig config = {.interval = DEFAULT_INTERVAL};
+    strcpy(config.mountpoint, "/");
+    bool credentials_selected = false;
+    bool host_selected = false, port_selected = false;
+    bool username_selected = false, password_selected = false;
+    bool interval_selected = false, mountpoint_selected = false, quiet_selected = false;
     static const struct option options[] = {
-        {"credentials", required_argument, NULL, 'c'},
+        {"config", required_argument, NULL, 'c'},
+        {"credentials", required_argument, NULL, 'C'},
+        {"host", required_argument, NULL, 'H'},
+        {"port", required_argument, NULL, 'p'},
+        {"username", required_argument, NULL, 'u'},
+        {"password", required_argument, NULL, 'w'},
         {"interval", required_argument, NULL, 'i'},
         {"mountpoint", required_argument, NULL, 'm'},
         {"quiet", no_argument, NULL, 'q'},
@@ -677,48 +1043,109 @@ int main(int argc, char **argv)
     };
 
     int option;
-    while ((option = getopt_long(argc, argv, "c:i:m:qh", options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "c:C:H:p:u:w:i:m:qh", options, NULL)) != -1) {
         switch (option) {
-        case 'c': credentials_path = optarg; break;
+        case 'c': config_path = optarg; break;
+        case 'C': credentials_path = optarg; credentials_selected = true; break;
+        case 'H': host_argument = optarg; host_selected = true; break;
+        case 'p': port_argument = optarg; port_selected = true; break;
+        case 'u': username_argument = optarg; username_selected = true; break;
+        case 'w': password_argument = optarg; password_selected = true; break;
         case 'i': {
             char *end = NULL;
             errno = 0;
-            interval = strtod(optarg, &end);
-            if (errno || end == optarg || *end != '\0' || !isfinite(interval) ||
-                interval < 0.1 || interval > 3600.0) {
+            config.interval = strtod(optarg, &end);
+            if (errno || end == optarg || *end != '\0' || !isfinite(config.interval) ||
+                config.interval < 0.1 || config.interval > 3600.0) {
                 fprintf(stderr, "Invalid interval '%s' (expected 0.1..3600 seconds)\n", optarg);
                 return EXIT_FAILURE;
             }
+            interval_selected = true;
             break;
         }
-        case 'm': mountpoint = optarg; break;
-        case 'q': quiet = true; break;
+        case 'm':
+            if (strlen(optarg) >= sizeof(config.mountpoint)) {
+                fprintf(stderr, "Mountpoint path is too long\n");
+                return EXIT_FAILURE;
+            }
+            strcpy(config.mountpoint, optarg);
+            mountpoint_selected = true;
+            break;
+        case 'q': config.quiet = true; quiet_selected = true; break;
         case 'h': usage(stdout, argv[0]); return EXIT_SUCCESS;
         default: usage(stderr, argv[0]); return EXIT_FAILURE;
         }
     }
-    if (argc - optind != 2) {
-        usage(stderr, argv[0]);
-        return EXIT_FAILURE;
+
+    int positional_count = argc - optind;
+    if (config_path) {
+        if (positional_count != 0 || credentials_selected || host_selected || port_selected ||
+            username_selected || password_selected || interval_selected || mountpoint_selected ||
+            quiet_selected) {
+            fprintf(stderr, "--config cannot be combined with other settings or positional arguments\n");
+            return EXIT_FAILURE;
+        }
+        if (read_config_json(config_path, &config) < 0)
+            return EXIT_FAILURE;
+    } else if (host_selected || port_selected || username_selected || password_selected) {
+        if (positional_count != 0 || credentials_selected || !host_selected || !port_selected ||
+            !username_selected || !password_selected) {
+            fprintf(stderr, "Argument mode requires --host, --port, --username, and --password only; do not add positional arguments\n");
+            return EXIT_FAILURE;
+        }
+        if (strlen(host_argument) >= sizeof(config.host) ||
+            strlen(port_argument) >= sizeof(config.port) ||
+            strlen(username_argument) >= sizeof(config.credentials.username) ||
+            strlen(password_argument) >= sizeof(config.credentials.password)) {
+            fprintf(stderr, "A host name or credential is too long\n");
+            return EXIT_FAILURE;
+        }
+        strcpy(config.host, host_argument);
+        strcpy(config.port, port_argument);
+        strcpy(config.credentials.username, username_argument);
+        strcpy(config.credentials.password, password_argument);
+    } else {
+        if (positional_count != 2) {
+            usage(stderr, argv[0]);
+            return EXIT_FAILURE;
+        }
+        const char *legacy_host = argv[optind];
+        const char *legacy_port = argv[optind + 1];
+        if (strlen(legacy_host) >= sizeof(config.host)) {
+            fprintf(stderr, "Host name is too long\n");
+            return EXIT_FAILURE;
+        }
+        if (strlen(legacy_port) >= sizeof(config.port)) {
+            fprintf(stderr, "TCP port argument is too long\n");
+            return EXIT_FAILURE;
+        }
+        strcpy(config.host, legacy_host);
+        strcpy(config.port, legacy_port);
+        if (load_credentials(credentials_path, &config.credentials) < 0)
+            return EXIT_FAILURE;
     }
 
-    const char *host = argv[optind];
-    const char *port = argv[optind + 1];
     char *end = NULL;
     errno = 0;
-    long port_number = strtol(port, &end, 10);
-    if (errno || end == port || *end != '\0' || port_number < 1 || port_number > 65535) {
-        fprintf(stderr, "Invalid TCP port '%s'\n", port);
+    long port_number = strtol(config.port, &end, 10);
+    if (errno || end == config.port || *end != '\0' || port_number < 1 || port_number > 65535) {
+        fprintf(stderr, "Invalid TCP port '%s'\n", config.port);
         return EXIT_FAILURE;
     }
-    if (host[0] == '\0' || mountpoint[0] == '\0') {
-        fprintf(stderr, "Host and mountpoint must not be empty\n");
+    if (config.host[0] == '\0' || config.mountpoint[0] == '\0' ||
+        config.credentials.username[0] == '\0' || config.credentials.password[0] == '\0' ||
+        strchr(config.credentials.username, ':') || strchr(config.credentials.username, '\n') ||
+        strchr(config.credentials.username, '\r') || strchr(config.credentials.password, '\n') ||
+        strchr(config.credentials.password, '\r')) {
+        fprintf(stderr, "Host, mountpoint, username and password must be non-empty; credentials cannot contain line breaks or a colon in the username\n");
+        return EXIT_FAILURE;
+    }
+    if (!isfinite(config.interval) || config.interval < 0.1 || config.interval > 3600.0) {
+        fprintf(stderr, "Invalid update interval (expected 0.1..3600 seconds)\n");
         return EXIT_FAILURE;
     }
 
-    Credentials credentials = {0};
-    if (load_credentials(credentials_path, &credentials) < 0)
-        return EXIT_FAILURE;
+    quiet = config.quiet;
 
     struct sigaction action = {0};
     action.sa_handler = handle_signal;
@@ -727,19 +1154,19 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &action, NULL);
 
     while (!stopping) {
-        log_message("Connecting to %s:%s...", host, port);
-        int fd = connect_to_server(host, port);
+        log_message("Connecting to %s:%s...", config.host, config.port);
+        int fd = connect_to_server(config.host, config.port);
         if (fd < 0) {
             if (!stopping)
                 log_message("Connection failed: %s", strerror(errno));
         } else {
             int probe_family = AF_UNSPEC;
-            if (authenticate(fd, &credentials, &probe_family) < 0) {
+            if (authenticate(fd, &config.credentials, &probe_family) < 0) {
                 if (!stopping)
                     log_message("Handshake failed: %s", strerror(errno));
             } else {
-                log_message("Connected; reporting system metrics every %.1f seconds", interval);
-                if (send_updates(fd, mountpoint, probe_family, interval) < 0 && !stopping)
+                log_message("Connected; reporting system metrics every %.1f seconds", config.interval);
+                if (send_updates(fd, config.mountpoint, probe_family, config.interval) < 0 && !stopping)
                     log_message("Disconnected: %s", strerror(errno));
             }
             shutdown(fd, SHUT_RDWR);
@@ -751,7 +1178,7 @@ int main(int argc, char **argv)
         }
     }
 
-    memset(&credentials, 0, sizeof(credentials));
+    memset(&config.credentials, 0, sizeof(config.credentials));
     log_message("Stopped");
     return EXIT_SUCCESS;
 }

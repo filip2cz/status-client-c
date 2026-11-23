@@ -1,6 +1,6 @@
 # ServerStatus C client
 
-A small Linux client for [BotoX/ServerStatus](https://github.com/BotoX/ServerStatus). It connects to the ServerStatus TCP listener, authenticates, and sends system statistics as newline-delimited updates. The client reconnects after network or server failures.
+A Linux client for [BotoX/ServerStatus](https://github.com/BotoX/ServerStatus). It connects to the ServerStatus TCP listener, authenticates, sends system statistics, and reconnects after a connection failure.
 
 ## Build
 
@@ -8,45 +8,76 @@ A small Linux client for [BotoX/ServerStatus](https://github.com/BotoX/ServerSta
 make
 ```
 
-This builds `status-client` with a C compiler. To choose another compiler or flags, set `CC` or `CFLAGS` when running `make`.
+The default output is `status-client`. You can set `CC` and `CFLAGS` when building. To keep an existing service's executable name, for example `status-x`, run `make TARGET=status-x`.
 
-## Configure credentials
+## Configuration modes
 
-Create `login.txt` in the current directory, or point to a different file with `-c`:
+Choose one of these modes.
 
-```text
-server_username server_password
-```
+### 1. JSON configuration
 
-`login.txt.example` shows the format. Keep the real file private:
+The JSON file contains every setting. Start the client with `--config`:
 
 ```sh
-cp login.txt.example login.txt
-chmod 600 login.txt
+./status-client --config config.json
 ```
 
-The credentials file is ignored by Git.
+`config.json.example` shows the required fields:
 
-## Run
+```json
+{
+  "host": "status.example.net",
+  "port": 35601,
+  "username": "server_username",
+  "password": "server_password",
+  "interval": 1,
+  "mountpoint": "/",
+  "quiet": false
+}
+```
+
+Copy the example to `config.json` and set permissions so only the service account can read the password:
 
 ```sh
-./status-client [options] host port
+cp config.json.example config.json
+chmod 600 config.json
 ```
 
-For example:
+### 2. Command-line arguments
+
+Pass the server and credentials directly as options. Interval, mountpoint, and quiet mode are also available:
 
 ```sh
-./status-client -c /etc/serverstatus/login.txt -i 1 status.example.net 35601
+./status-client --host status.example.net --port 35601 \
+  --username server_username --password server_password \
+  --interval 1 --mountpoint / --quiet
 ```
 
-Options:
+The password may be visible to other local users in the process list. Use JSON mode if that matters for your system.
 
-* `-c, --credentials FILE` — credentials file (default: `login.txt`)
+### 3. Legacy mode
+
+Existing installations (version =< 0.2.0) can replace the executable and keep the same invocation and `login.txt` format:
+
+```sh
+./status-x host port
+```
+
+The client reads `login.txt` from its current working directory. The file contains `username password` on one line; `login.txt.example` shows the format. The credentials file can also be selected explicitly with `-C FILE`. Optional `-i`, `-m`, and `-q` settings remain available.
+
+## Options
+
+* `-c, --config FILE` — use a complete JSON configuration
+* `-H, --host HOST` — server hostname or address
+* `-p, --port PORT` — ServerStatus TCP port
+* `-u, --username USER` — account username
+* `--password PASS` — account password
+* `-C, --credentials FILE` — credentials file for legacy mode
 * `-i, --interval SECONDS` — update interval from 0.1 to 3600 seconds (default: 1)
 * `-m, --mountpoint PATH` — filesystem reported as HDD (default: `/`)
 * `-q, --quiet` — suppress routine connection messages
 * `-h, --help` — show help
 
-Memory values use KiB, disk values use MiB, and network values are bytes per second. CPU usage is calculated from `/proc/stat`; traffic is summed across interfaces except loopback and `tun*`. The client periodically checks IPv4 or IPv6 connectivity, as requested by the ServerStatus server. It requires Linux procfs and the standard POSIX socket and filesystem interfaces.
+Memory values use KiB, disk values use MiB, and network values are bytes per second. CPU usage comes from `/proc/stat`; network traffic is summed across interfaces except loopback and `tun*`. The client periodically checks IPv4 or IPv6 connectivity as requested by ServerStatus. It requires Linux procfs and standard POSIX socket and filesystem interfaces.
 
 Stop the client with `Ctrl-C` or `SIGTERM`.
