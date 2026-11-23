@@ -21,6 +21,7 @@ jobs:
 
   build-x86:
     name: Build x86 binaries
+    needs: test
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -48,6 +49,7 @@ jobs:
 
   build-arm:
     name: Build AArch64 and ARMv7 binaries
+    needs: test
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -75,6 +77,7 @@ jobs:
 
   build-armv5:
     name: Build ARMv5 binary
+    needs: test
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -99,6 +102,7 @@ jobs:
 
   build-blackfin:
     name: Build Blackfin binary
+    needs: test
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
