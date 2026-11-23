@@ -10,6 +10,16 @@ make
 
 The default output is `status-client`. You can set `CC` and `CFLAGS` when building. To keep an existing service's executable name, for example `status-x`, run `make TARGET=status-x`.
 
+## Tests
+
+Run the C test suite with:
+
+```sh
+make test
+```
+
+Tests exercise the internal functions directly and use local sockets; no ServerStatus server or external network connection is needed.
+
 ## Configuration modes
 
 Choose one of these modes.

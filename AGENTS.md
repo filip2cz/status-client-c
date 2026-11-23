@@ -12,11 +12,14 @@ The implementation is intentionally self-contained in `status.c`. It uses POSIX/
 
 * `status.c` contains configuration parsing, TCP protocol handling, metric collection, retry logic, and `main`.
 * `Makefile` builds `status-client` from `status.c`. The default flags use C11 and warnings; `CC`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`, and `TARGET` can be overridden.
+* `tests/test_status.c` includes `status.c` into a test translation unit to call its internal `static` functions. Its local DNS wrapper redirects the IPv4/IPv6 probes to loopback, so tests do not need external network access.
 * `.github/workflows/main.yml` cross-compiles the client and creates a draft release containing `status-linux-x64`, `status-linux-x86`, `status-linux-aarch64`, `status-linux-armv7l`, `status-linux-armv5te`, and `status-linux-blackfin`.
 * `README.md` documents setup and the three configuration modes.
 * `config.json.example` and `login.txt.example` are templates. Real `config.json` and `login.txt` files are ignored by Git because they contain credentials.
 
-There is no separate library layer or generated source. New dependencies can make one or more cross-compilers fail, so prefer libc/POSIX facilities already used in the program.
+There is no separate library layer or generated source. New dependencies can make one or more cross-compilers fail, so prefer libc/POSIX facilities already used in the program. Run the unit suite with `make test`; it builds an ignored `tests/test_status` executable.
+
+The suite calls each production function from the included source file, including the renamed entry point, and covers parsers, validation failures, socket framing, authentication, metric calculations/reads, connectivity probes, and the update loop. It uses a child process for the handshake and a local alarm to stop the normally continuous sender loop. DNS for the probe hostnames is intercepted at link time and rewritten to loopback; keep these tests hermetic rather than allowing them to contact public hosts.
 
 ## Runtime architecture
 
@@ -49,7 +52,7 @@ The parser helpers (`json_space`, `json_string`, `json_number`, `json_boolean`, 
 
 ### TCP protocol and reconnect behavior
 
-`connect_to_server` uses `getaddrinfo(AF_UNSPEC)` and tries the resolved IPv4/IPv6 addresses. `connect_one` performs a nonblocking connect and polls for completion for up to ten seconds per address; name resolution itself is outside that timeout. The line reader has a 4096-byte buffer and waits at most 30 seconds for socket input. Sending handles partial writes and suppresses `SIGPIPE` where `MSG_NOSIGNAL` is available.
+`connect_to_server` uses `getaddrinfo(AF_UNSPEC)` and tries the resolved IPv4/IPv6 addresses. `connect_one` performs a nonblocking connect and polls for completion for up to ten seconds per address; name resolution itself is outside that timeout. The line reader has a 4096-byte buffer and waits at most 30 seconds for socket input. `wait_fd` prioritizes requested readiness over a simultaneous hangup so buffered data can be drained before the peer close is handled. Sending handles partial writes and suppresses `SIGPIPE` where `MSG_NOSIGNAL` is available.
 
 The protocol exchange is:
 
@@ -105,5 +108,5 @@ Fallible file, configuration, and socket operations generally return `0` on succ
 * When changing the handshake, verify compatibility with BotoX/ServerStatus' newline-delimited protocol and retain bounded socket waits, reconnect handling, and partial-write handling.
 * Keep credentials out of logs. The real credential files are ignored by Git; never replace those ignore rules with tracked secrets.
 * Keep code compatible with the compilers used by both `Makefile` and `.github/workflows/main.yml`. The workflow uses GNU C99 for legacy cross-toolchains while the local Makefile uses C11; avoid newer language features unless the Blackfin build is updated too.
-* Build with `make` or compile directly with the system C compiler after C changes. There is currently no test suite or test target in the repository.
+* Build with `make` and run `make test` after C changes. Tests are written in `tests/test_status.c`; the target uses GNU linker `--wrap=getaddrinfo` to keep probe tests local.
 

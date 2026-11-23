@@ -5,13 +5,20 @@ LDFLAGS ?=
 
 TARGET := status-client
 SOURCES := status.c
+TEST_TARGET := tests/test_status
 
-.PHONY: all clean
+.PHONY: all test clean
 
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 $(SOURCES) $(LDFLAGS) -o $@
 
+$(TEST_TARGET): tests/test_status.c status.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 tests/test_status.c $(LDFLAGS) -Wl,--wrap=getaddrinfo -o $@
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(TEST_TARGET)
