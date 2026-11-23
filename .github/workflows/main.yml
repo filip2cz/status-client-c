@@ -31,14 +31,14 @@ jobs:
 
       - name: Build ARM binaries
         run: |
-          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
           aarch64-linux-gnu-gcc -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-aarch64
           arm-linux-gnueabihf-gcc -march=armv7-a -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv7l
           sudo apt-get purge -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
 
       - name: Build ARMv5 binary
         run: |
-          sudo apt-get install --no-install-recommends -y gcc-arm-linux-gnueabi
+          sudo apt-get install --no-install-recommends -y gcc-arm-linux-gnueabi libc6-dev-armel-cross
           arm-linux-gnueabi-gcc -march=armv5te -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv5te
           sudo apt-get purge -y gcc-arm-linux-gnueabi
 
