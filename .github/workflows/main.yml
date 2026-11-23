@@ -1,56 +1,64 @@
-name: "Status Client written in C"
+name: Build ServerStatus clients
 
 on:
   push:
     branches:
       - main
-      
+
 jobs:
   build:
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-    runs-on: ubuntu-20.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-          
-      - run: mkdir build
+      - name: Check out source
+        uses: actions/checkout@v4
 
-      - run: sudo apt update
+      - name: Prepare build directory
+        run: mkdir -p build
 
-      - run: sudo apt install gcc gcc-multilib
-      - run: gcc --version
-      - run: ldd --version
-      - run: gcc ./status.c -o ./build/status-linux-x64
-      - run: gcc -m32 ./status.c -o ./build/status-linux-x86
-      - run: sudo apt purge gcc-multilib
+      - name: Build x86 binaries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc gcc-multilib
+          gcc -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-x64
+          gcc -m32 -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-x86
+          sudo apt-get purge -y gcc-multilib
 
-      - run: sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-      - run: aarch64-linux-gnu-gcc ./status.c -o ./build/status-linux-aarch64
-      - run: arm-linux-gnueabihf-gcc ./status.c -o ./build/status-linux-armv7l
-      - run: sudo apt purge gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+      - name: Build ARM binaries
+        run: |
+          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          aarch64-linux-gnu-gcc -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-aarch64
+          arm-linux-gnueabihf-gcc -march=armv7-a -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv7l
+          sudo apt-get purge -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
 
-      - run: sudo apt install gcc-arm-linux-gnueabi
-      - run: arm-linux-gnueabi-gcc -march=armv5te ./status.c -o ./build/status-linux-armv5te
-      - run: sudo apt purge gcc-arm-linux-gnueabi
+      - name: Build ARMv5 binary
+        run: |
+          sudo apt-get install --no-install-recommends -y gcc-arm-linux-gnueabi
+          arm-linux-gnueabi-gcc -march=armv5te -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv5te
+          sudo apt-get purge -y gcc-arm-linux-gnueabi
 
-      - run: wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
-      - run: wget https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
-      - run: tar -xf blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
-      - run: tar -xf blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
+      - name: Install Blackfin toolchain
+        run: |
+          wget -q https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
+          wget -q https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
+          tar -xf blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
+          tar -xf blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
 
-      - run: ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc ./status.c -o ./build/status-linux-blackfin
-          
-      - name: Set outputs
+      - name: Build Blackfin binary
+        run: ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc -std=gnu99 -O2 -Wall -Wextra status.c -o build/status-linux-blackfin
+
+      - name: Set release tag
         id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-        
-      - uses: ncipollo/release-action@v1
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "./build/status*"
+          artifacts: "build/status*"
           commit: main
           generateReleaseNotes: true
           draft: true
-          # tag: ${{ github.event.head_commit.id }}
           tag: ${{ steps.vars.outputs.sha_short }}
