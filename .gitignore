@@ -2,4 +2,5 @@
 login.txt
 config.json
 status-client
+status-linux-x64
 /tests/test_status

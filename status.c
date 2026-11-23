@@ -12,8 +12,8 @@
 #include <float.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <linux/if.h>
 #include <netdb.h>
-#include <net/if.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdarg.h>
