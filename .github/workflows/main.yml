@@ -15,6 +15,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Run C test suite
+        run: make test
+
       - name: Prepare build directory
         run: mkdir -p build
 
