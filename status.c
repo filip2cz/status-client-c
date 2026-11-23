@@ -729,11 +729,23 @@ static int read_line(int fd, LineReader *reader, char *line, size_t line_size)
     }
 }
 
+static int read_protocol_line(int fd, LineReader *reader, char *line, size_t line_size)
+{
+    for (unsigned skipped = 0; skipped < 8; ++skipped) {
+        if (read_line(fd, reader, line, line_size) < 0)
+            return -1;
+        if (line[0] != '\0')
+            return 0;
+    }
+    errno = EPROTO;
+    return -1;
+}
+
 static int authenticate(int fd, const Credentials *credentials, int *probe_family)
 {
     LineReader reader = {0};
     char line[MAX_LINE];
-    if (read_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
         return -1;
     if (!strstr(line, "Authentication required")) {
         fprintf(stderr, "Server rejected connection: %s\n", line);
@@ -753,14 +765,14 @@ static int authenticate(int fd, const Credentials *credentials, int *probe_famil
     }
     memset(login, 0, sizeof(login));
 
-    if (read_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
         return -1;
     if (!strstr(line, "Authentication successful")) {
         fprintf(stderr, "Authentication failed: %s\n", line);
         errno = EACCES;
         return -1;
     }
-    if (read_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
         return -1;
     if (strstr(line, "IPv4"))
         *probe_family = AF_INET6;

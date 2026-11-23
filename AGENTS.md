@@ -66,7 +66,7 @@ The connection to the master is plain TCP; this implementation does not add TLS 
 
 The family announced by the server tells the client which *other* address family to probe: an `IPv4` server announcement causes an IPv6 probe and an `online6` field; an `IPv6` announcement causes an IPv4 probe and an `online4` field. Probes use `ipv6.google.com:80` or `ipv4.google.com:80`, with a two-second connect timeout, and repeat every ten seconds. This probe is part of the reported online status, not the connection to the ServerStatus master.
 
-`authenticate` owns the handshake state. `send_updates` owns the connected reporting loop. Errors return to `main`, which closes the socket and waits three seconds before reconnecting. Avoid adding unbounded waits to either path.
+`authenticate` owns the handshake state and skips up to eight empty protocol lines between nonempty messages, matching the upstream parser's treatment of CR/LF separators. `send_updates` owns the connected reporting loop. Errors return to `main`, which closes the socket and waits three seconds before reconnecting. Avoid adding unbounded waits to either path.
 
 ## Metric collection and units
 
@@ -90,7 +90,7 @@ CPU and network rates need a previous snapshot, so the first update after a conn
 `status.c` is organized in functional sections rather than separate translation units:
 
 * **Process utilities and config:** `handle_signal`, `log_message`, `usage`, `trim`, `read_stream_line`, `is_finite_number`, `load_credentials`, JSON parser helpers, `read_config_json`.
-* **Socket primitives:** `wait_fd`, `connect_one`, `connect_to_server`, `send_all`, `send_line`, `read_line`.
+* **Socket primitives:** `wait_fd`, `connect_one`, `connect_to_server`, `send_all`, `send_line`, `read_line`, `read_protocol_line`.
 * **Server handshake:** `authenticate`.
 * **Metric readers/calculations:** `read_cpu_counters`, `read_network_counters`, `read_memory`, `read_disk`, `read_load_average`, `cpu_percent`, `counter_rate`, `collect_metrics`.
 * **Periodic status loop:** `probe_connect`, `monotonic_seconds`, `sleep_interval`, `send_updates`.

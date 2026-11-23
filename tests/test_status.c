@@ -382,10 +382,10 @@ static void test_authenticate(void)
         char login[128];
         FILE *stream = fdopen(pair[1], "r+");
         if (!stream) _exit(10);
-        const char *required = "Authentication required\n";
+        const char *required = "\nAuthentication required:\n";
         if (write_all_test(pair[1], required, strlen(required)) < 0) _exit(11);
         if (!fgets(login, sizeof(login), stream) || strcmp(login, "demo:secret\n") != 0) _exit(12);
-        const char *success = "Authentication successful\nIPv6\n";
+        const char *success = "\nAuthentication successful. Access granted.\n\nYou are connecting via: IPv6\n";
         if (write_all_test(pair[1], success, strlen(success)) < 0) _exit(13);
         fclose(stream);
         _exit(0);
