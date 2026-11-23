@@ -13,7 +13,7 @@ The implementation is intentionally self-contained in `status.c`. It uses POSIX/
 * `status.c` contains configuration parsing, TCP protocol handling, metric collection, retry logic, and `main`.
 * `Makefile` builds `status-client` from `status.c`. The default flags use C11 and warnings; `CC`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`, and `TARGET` can be overridden.
 * `tests/test_status.c` includes `status.c` into a test translation unit to call its internal `static` functions. Its local DNS wrapper redirects the IPv4/IPv6 probes to loopback, so tests do not need external network access.
-* `.github/workflows/main.yml` runs `make test` before cross-compiling the client, then creates a draft release containing `status-linux-x64`, `status-linux-x86`, `status-linux-aarch64`, `status-linux-armv7l`, `status-linux-armv5te`, and `status-linux-blackfin`. ARM build steps explicitly install their `libc6-dev-*-cross` packages because the workflow suppresses apt recommendations.
+* `.github/workflows/main.yml` runs `make test` before cross-compiling the client, then creates a draft release containing `status-linux-x64`, `status-linux-x86`, `status-linux-aarch64`, `status-linux-armv7l`, `status-linux-armv5te`, and `status-linux-blackfin`. ARM build steps explicitly install their `libc6-dev-*-cross` packages because the workflow suppresses apt recommendations. ARMv7 uses the hard-float ABI with the `vfpv3-d16` FPU.
 * `README.md` documents setup and the three configuration modes.
 * `config.json.example` and `login.txt.example` are templates. Real `config.json` and `login.txt` files are ignored by Git because they contain credentials.
 
