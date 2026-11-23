@@ -5,12 +5,13 @@ on:
     branches:
       - main
 
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+permissions:
+  contents: read
 
+jobs:
+  test:
+    name: Test client
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -18,36 +19,130 @@ jobs:
       - name: Run C test suite
         run: make test
 
-      - name: Prepare build directory
-        run: mkdir -p build
+  build-x86:
+    name: Build x86 binaries
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
 
-      - name: Build x86 binaries
+      - name: Install x86 toolchains
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y gcc gcc-multilib
+
+      - name: Compile x86 binaries
+        run: |
+          mkdir -p build
           gcc -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-x64
           gcc -m32 -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-x86
 
-      - name: Build ARM binaries
+      - name: Upload x86 binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86
+          path: |
+            build/status-linux-x64
+            build/status-linux-x86
+          if-no-files-found: error
+
+  build-arm:
+    name: Build AArch64 and ARMv7 binaries
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install ARM toolchains and development headers
         run: |
+          sudo apt-get update
           sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
+
+      - name: Compile AArch64 and ARMv7 binaries
+        run: |
+          mkdir -p build
           aarch64-linux-gnu-gcc -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-aarch64
           arm-linux-gnueabihf-gcc -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv7l
 
-      - name: Build ARMv5 binary
+      - name: Upload AArch64 and ARMv7 binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm
+          path: |
+            build/status-linux-aarch64
+            build/status-linux-armv7l
+          if-no-files-found: error
+
+  build-armv5:
+    name: Build ARMv5 binary
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install ARMv5 toolchain and development headers
         run: |
+          sudo apt-get update
           sudo apt-get install --no-install-recommends -y gcc-arm-linux-gnueabi libc6-dev-armel-cross
+
+      - name: Compile ARMv5 binary
+        run: |
+          mkdir -p build
           arm-linux-gnueabi-gcc -march=armv5te -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-armv5te
 
-      - name: Install Blackfin toolchain
+      - name: Upload ARMv5 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-armv5
+          path: build/status-linux-armv5te
+          if-no-files-found: error
+
+  build-blackfin:
+    name: Build Blackfin binary
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Download Blackfin toolchain
         run: |
           wget -q https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
           wget -q https://master.dl.sourceforge.net/project/adi-toolchain/2014R1/2014R1-RC2/x86_64/blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
           tar -xf blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
           tar -xf blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
 
-      - name: Build Blackfin binary
-        run: ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc -std=gnu99 -O2 -Wall -Wextra status.c -o build/status-linux-blackfin
+      - name: Compile Blackfin binary
+        run: |
+          mkdir -p build
+          ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc -std=gnu99 -O2 -Wall -Wextra status.c -o build/status-linux-blackfin
+
+      - name: Upload Blackfin binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-blackfin
+          path: build/status-linux-blackfin
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs:
+      - test
+      - build-x86
+      - build-arm
+      - build-armv5
+      - build-blackfin
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Download all architecture binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          merge-multiple: true
 
       - name: Set release tag
         id: vars
@@ -58,7 +153,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: "build/status*"
-          commit: main
+          commit: ${{ github.sha }}
           generateReleaseNotes: true
           draft: true
           tag: ${{ steps.vars.outputs.sha_short }}
