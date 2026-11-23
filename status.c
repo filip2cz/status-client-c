@@ -1,3 +1,9 @@
+/*
+ * Linux client for BotoX/ServerStatus. It collects host metrics and sends
+ * periodic updates to a ServerStatus master over TCP. Configuration can be
+ * provided through a JSON file, command-line options, or the legacy
+ * host/port interface with credentials read from login.txt.
+ */
 #define _POSIX_C_SOURCE 200809L
 #define _DEFAULT_SOURCE
 
