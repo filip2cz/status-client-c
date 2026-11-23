@@ -19,7 +19,7 @@ The implementation is intentionally self-contained in `status.c`. It uses POSIX/
 
 There is no separate library layer or generated source. New dependencies can make one or more cross-compilers fail, so prefer libc/POSIX facilities already used in the program. The legacy Blackfin uClibc toolchain lacks some newer libc APIs, so the source uses its own `read_stream_line`, checks finite doubles using `DBL_MAX`, and reads load average from `/proc/loadavg` instead of relying on `getline`, `isfinite`, or `getloadavg`. Run the unit suite with `make test`; it builds an ignored `tests/test_status` executable. CI runs the architecture build jobs only after tests pass; the release job packages artifacts only after all builds pass.
 
-The suite calls each production function from the included source file, including the renamed entry point, and covers parsers, validation failures, socket framing, authentication, metric calculations/reads, connectivity probes, and the update loop. It uses a child process for the handshake and a local alarm to stop the normally continuous sender loop. DNS for the probe hostnames is intercepted at link time and rewritten to loopback; keep these tests hermetic rather than allowing them to contact public hosts.
+The suite calls each production function from the included source file, including the renamed entry point, and covers parsers, validation failures, socket framing (including upstream NUL-padded lines), authentication success and rejection, reset during authentication, metric calculations/reads, connectivity probes, and the update loop. It uses child processes for handshake scenarios and a local alarm to stop the normally continuous sender loop. DNS for the probe hostnames is intercepted at link time and rewritten to loopback; keep these tests hermetic rather than allowing them to contact public hosts.
 
 ## Runtime architecture
 
@@ -52,11 +52,11 @@ The parser helpers (`json_space`, `json_string`, `json_number`, `json_boolean`, 
 
 ### TCP protocol and reconnect behavior
 
-`connect_to_server` uses `getaddrinfo(AF_UNSPEC)` and tries the resolved IPv4/IPv6 addresses. `connect_one` performs a nonblocking connect and polls for completion for up to ten seconds per address; name resolution itself is outside that timeout. The line reader has a 4096-byte buffer and waits at most 30 seconds for socket input. `wait_fd` prioritizes requested readiness over a simultaneous hangup so buffered data can be drained before the peer close is handled. Sending handles partial writes and suppresses `SIGPIPE` where `MSG_NOSIGNAL` is available.
+`connect_to_server` uses `getaddrinfo(AF_UNSPEC)` and tries the resolved IPv4/IPv6 addresses. `connect_one` performs a nonblocking connect and polls for completion for up to ten seconds per address; name resolution itself is outside that timeout. The line reader has a 4096-byte buffer, removes ASCII control bytes from completed protocol lines (including the NUL padding appended by upstream ServerStatus), and waits at most 30 seconds for socket input. `wait_fd` prioritizes requested readiness over a simultaneous hangup so buffered data can be drained before the peer close is handled. Sending handles partial writes and suppresses `SIGPIPE` where `MSG_NOSIGNAL` is available.
 
 The protocol exchange is:
 
-1. Read a line containing `Authentication required`.
+1. Read a line containing `Authentication required`; ignore upstream NUL padding after line endings.
 2. Send `username:password` followed by `\n`.
 3. Read a line containing `Authentication successful`.
 4. Read the server's `IPv4` or `IPv6` announcement.
@@ -66,7 +66,7 @@ The connection to the master is plain TCP; this implementation does not add TLS 
 
 The family announced by the server tells the client which *other* address family to probe: an `IPv4` server announcement causes an IPv6 probe and an `online6` field; an `IPv6` announcement causes an IPv4 probe and an `online4` field. Probes use `ipv6.google.com:80` or `ipv4.google.com:80`, with a two-second connect timeout, and repeat every ten seconds. This probe is part of the reported online status, not the connection to the ServerStatus master.
 
-`authenticate` owns the handshake state and skips up to eight empty protocol lines between nonempty messages, matching the upstream parser's treatment of CR/LF separators. `send_updates` owns the connected reporting loop. Errors return to `main`, which closes the socket and waits three seconds before reconnecting. Avoid adding unbounded waits to either path.
+`authenticate` owns the handshake state and skips up to eight empty protocol lines between nonempty messages, matching the upstream parser's treatment of CR/LF separators. `read_line` removes nonprinting ASCII control bytes because the upstream sender pads each line with NUL bytes. Handshake transport failures identify the phase that failed; diagnostics never include credentials. `send_updates` owns the connected reporting loop. Errors return to `main`, which closes the socket and waits three seconds before reconnecting. Avoid adding unbounded waits to either path.
 
 ## Metric collection and units
 
@@ -91,7 +91,7 @@ CPU and network rates need a previous snapshot, so the first update after a conn
 
 * **Process utilities and config:** `handle_signal`, `log_message`, `usage`, `trim`, `read_stream_line`, `is_finite_number`, `load_credentials`, JSON parser helpers, `read_config_json`.
 * **Socket primitives:** `wait_fd`, `connect_one`, `connect_to_server`, `send_all`, `send_line`, `read_line`, `read_protocol_line`.
-* **Server handshake:** `authenticate`.
+* **Server handshake:** `report_handshake_error`, `authenticate`.
 * **Metric readers/calculations:** `read_cpu_counters`, `read_network_counters`, `read_memory`, `read_disk`, `read_load_average`, `cpu_percent`, `counter_rate`, `collect_metrics`.
 * **Periodic status loop:** `probe_connect`, `monotonic_seconds`, `sleep_interval`, `send_updates`.
 * **Program entry and orchestration:** `main` selects the mode, validates the resulting `ProgramConfig`, and owns reconnect/cleanup.

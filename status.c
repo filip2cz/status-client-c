@@ -685,18 +685,29 @@ static int send_line(int fd, const char *line)
 
 static int read_line(int fd, LineReader *reader, char *line, size_t line_size)
 {
+    if (line_size == 0) {
+        errno = EMSGSIZE;
+        return -1;
+    }
     for (;;) {
         for (size_t i = reader->begin; i < reader->end; ++i) {
             if (reader->data[i] == '\n') {
                 size_t length = i - reader->begin;
                 if (length > 0 && reader->data[reader->begin + length - 1] == '\r')
                     --length;
-                if (length >= line_size) {
-                    errno = EMSGSIZE;
-                    return -1;
+                size_t output_length = 0;
+                for (size_t j = 0; j < length; ++j) {
+                    unsigned char character = (unsigned char)reader->data[reader->begin + j];
+                    /* ServerStatus' upstream sender pads each line with NUL bytes. */
+                    if (character < 0x20 || character == 0x7f)
+                        continue;
+                    if (output_length + 1 >= line_size) {
+                        errno = EMSGSIZE;
+                        return -1;
+                    }
+                    line[output_length++] = (char)character;
                 }
-                memcpy(line, reader->data + reader->begin, length);
-                line[length] = '\0';
+                line[output_length] = '\0';
                 reader->begin = i + 1;
                 if (reader->begin == reader->end)
                     reader->begin = reader->end = 0;
@@ -741,12 +752,21 @@ static int read_protocol_line(int fd, LineReader *reader, char *line, size_t lin
     return -1;
 }
 
+static void report_handshake_error(const char *phase)
+{
+    int saved_errno = errno;
+    fprintf(stderr, "Handshake failed while %s: %s\n", phase, strerror(saved_errno));
+    errno = saved_errno;
+}
+
 static int authenticate(int fd, const Credentials *credentials, int *probe_family)
 {
     LineReader reader = {0};
     char line[MAX_LINE];
-    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0) {
+        report_handshake_error("waiting for the authentication challenge");
         return -1;
+    }
     if (!strstr(line, "Authentication required")) {
         fprintf(stderr, "Server rejected connection: %s\n", line);
         errno = EACCES;
@@ -757,23 +777,29 @@ static int authenticate(int fd, const Credentials *credentials, int *probe_famil
     int length = snprintf(login, sizeof(login), "%s:%s", credentials->username, credentials->password);
     if (length < 0 || (size_t)length >= sizeof(login)) {
         errno = EMSGSIZE;
+        report_handshake_error("preparing authentication credentials");
         return -1;
     }
     if (send_line(fd, login) < 0) {
+        report_handshake_error("sending authentication credentials");
         memset(login, 0, sizeof(login));
         return -1;
     }
     memset(login, 0, sizeof(login));
 
-    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0) {
+        report_handshake_error("waiting for the authentication result");
         return -1;
+    }
     if (!strstr(line, "Authentication successful")) {
         fprintf(stderr, "Authentication failed: %s\n", line);
         errno = EACCES;
         return -1;
     }
-    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0)
+    if (read_protocol_line(fd, &reader, line, sizeof(line)) < 0) {
+        report_handshake_error("waiting for the server address-family announcement");
         return -1;
+    }
     if (strstr(line, "IPv4"))
         *probe_family = AF_INET6;
     else if (strstr(line, "IPv6"))
@@ -1234,10 +1260,7 @@ int main(int argc, char **argv)
                 log_message("Connection failed: %s", strerror(errno));
         } else {
             int probe_family = AF_UNSPEC;
-            if (authenticate(fd, &config.credentials, &probe_family) < 0) {
-                if (!stopping)
-                    log_message("Handshake failed: %s", strerror(errno));
-            } else {
+            if (authenticate(fd, &config.credentials, &probe_family) == 0) {
                 log_message("Connected; reporting system metrics every %.1f seconds", config.interval);
                 if (send_updates(fd, config.mountpoint, probe_family, config.interval) < 0 && !stopping)
                     log_message("Disconnected: %s", strerror(errno));

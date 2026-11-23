@@ -326,6 +326,9 @@ static void test_wait_and_sockets(void)
     char line[64];
     CHECK(read_line(pair[1], &reader, line, sizeof(line)) == 0 && strcmp(line, "alpha") == 0);
     CHECK(read_line(pair[1], &reader, line, sizeof(line)) == 0 && strcmp(line, "beta") == 0);
+    static const char padded_line[] = "\0\0gamma\n\0\0";
+    CHECK(write_all_test(pair[0], padded_line, sizeof(padded_line) - 1) == 0);
+    CHECK(read_line(pair[1], &reader, line, sizeof(line)) == 0 && strcmp(line, "gamma") == 0);
     close(pair[0]); close(pair[1]);
 
     CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
@@ -382,11 +385,13 @@ static void test_authenticate(void)
         char login[128];
         FILE *stream = fdopen(pair[1], "r+");
         if (!stream) _exit(10);
-        const char *required = "\nAuthentication required:\n";
-        if (write_all_test(pair[1], required, strlen(required)) < 0) _exit(11);
+        static const char required[] = "\nAuthentication required:\n\0\0";
+        if (write_all_test(pair[1], required, sizeof(required) - 1) < 0) _exit(11);
         if (!fgets(login, sizeof(login), stream) || strcmp(login, "demo:secret\n") != 0) _exit(12);
-        const char *success = "\nAuthentication successful. Access granted.\n\nYou are connecting via: IPv6\n";
-        if (write_all_test(pair[1], success, strlen(success)) < 0) _exit(13);
+        static const char success[] =
+            "Authentication successful. Access granted.\n\0\0"
+            "\n\0\0You are connecting via: IPv6\n\0\0";
+        if (write_all_test(pair[1], success, sizeof(success) - 1) < 0) _exit(13);
         fclose(stream);
         _exit(0);
     }
@@ -406,6 +411,56 @@ static void test_authenticate(void)
     restore_stderr(saved);
     CHECK(auth_result < 0);
     close(pair[0]); close(pair[1]);
+
+    CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    child = fork();
+    CHECK(child >= 0);
+    if (child == 0) {
+        close(pair[0]);
+        char login[128];
+        FILE *stream = fdopen(pair[1], "r+");
+        if (!stream) _exit(20);
+        static const char required[] = "Authentication required:\n\0\0";
+        if (write_all_test(pair[1], required, sizeof(required) - 1) < 0) _exit(21);
+        if (!fgets(login, sizeof(login), stream) || strcmp(login, "demo:secret\n") != 0) _exit(22);
+        static const char rejected[] = "Wrong username and/or password.\n\0\0";
+        if (write_all_test(pair[1], rejected, sizeof(rejected) - 1) < 0) _exit(23);
+        fclose(stream);
+        _exit(0);
+    }
+    close(pair[1]);
+    saved = suppress_stderr();
+    auth_result = authenticate(pair[0], &credentials, &family);
+    int auth_errno = errno;
+    restore_stderr(saved);
+    CHECK(auth_result < 0 && auth_errno == EACCES);
+    close(pair[0]);
+    status = 0;
+    CHECK(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+    CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    child = fork();
+    CHECK(child >= 0);
+    if (child == 0) {
+        close(pair[0]);
+        char login[128];
+        FILE *stream = fdopen(pair[1], "r+");
+        if (!stream) _exit(30);
+        static const char required[] = "Authentication required:\n\0\0";
+        if (write_all_test(pair[1], required, sizeof(required) - 1) < 0) _exit(31);
+        if (!fgets(login, sizeof(login), stream) || strcmp(login, "demo:secret\n") != 0) _exit(32);
+        fclose(stream);
+        _exit(0);
+    }
+    close(pair[1]);
+    saved = suppress_stderr();
+    auth_result = authenticate(pair[0], &credentials, &family);
+    auth_errno = errno;
+    restore_stderr(saved);
+    CHECK(auth_result < 0 && auth_errno == ECONNRESET);
+    close(pair[0]);
+    status = 0;
+    CHECK(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 static void test_metric_functions(void)

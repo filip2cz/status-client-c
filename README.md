@@ -91,3 +91,8 @@ The client reads `login.txt` from its current working directory. The file contai
 Memory values use KiB, disk values use MiB, and network values are bytes per second. CPU usage comes from `/proc/stat`; network traffic is summed across interfaces except loopback and `tun*`. The client periodically checks IPv4 or IPv6 connectivity as requested by ServerStatus. It requires Linux procfs and standard POSIX socket and filesystem interfaces.
 
 Stop the client with `Ctrl-C` or `SIGTERM`.
+
+If the server closes the connection during authentication, the client reports
+which handshake step failed. It never includes the configured password in
+diagnostic output. The protocol reader also handles the NUL padding used by
+the upstream ServerStatus sender.
