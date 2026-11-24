@@ -12,7 +12,6 @@
 #include <float.h>
 #include <getopt.h>
 #include <inttypes.h>
-#include <linux/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -25,6 +24,8 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+/* Older Blackfin uClibc's linux/if.h uses struct sockaddr without defining it. */
+#include <linux/if.h>
 #include <sys/statvfs.h>
 #include <sys/sysinfo.h>
 #include <time.h>
