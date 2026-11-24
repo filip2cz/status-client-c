@@ -127,14 +127,59 @@ jobs:
           path: build/status-linux-blackfin
           if-no-files-found: error
 
-  release:
-    name: Create draft release
+  verify-binaries:
+    name: Smoke test architecture binaries
     needs:
-      - test
       - build-x86
       - build-arm
       - build-armv5
       - build-blackfin
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all architecture binaries
+        uses: actions/download-artifact@v8
+        with:
+          path: build
+          merge-multiple: true
+
+      - name: Install emulators and target runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y binutils qemu-user libc6-i386 libc6-arm64-cross libc6-armhf-cross libc6-armel-cross
+
+      - name: Run binary smoke tests
+        run: |
+          set -euo pipefail
+          chmod +x build/status-linux-*
+
+          check_help() {
+            name="$1"
+            shift
+            output="/tmp/${name}-help.txt"
+            "$@" --help > "$output"
+            grep -q '^Usage modes:' "$output"
+            echo "PASS: $name --help"
+          }
+
+          check_help status-linux-x64 ./build/status-linux-x64
+          check_help status-linux-x86 ./build/status-linux-x86
+          check_help status-linux-aarch64 qemu-aarch64 -L /usr/aarch64-linux-gnu ./build/status-linux-aarch64
+          check_help status-linux-armv7l qemu-arm -cpu cortex-a8 -L /usr/arm-linux-gnueabihf ./build/status-linux-armv7l
+          check_help status-linux-armv5te qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi ./build/status-linux-armv5te
+
+          for binary in build/status-linux-*; do
+            test -s "$binary"
+          done
+          readelf -h build/status-linux-blackfin > /tmp/status-linux-blackfin-elf.txt
+          grep -q 'Class:.*ELF32' /tmp/status-linux-blackfin-elf.txt
+          grep -q 'Machine:.*Blackfin' /tmp/status-linux-blackfin-elf.txt
+          echo "PASS: status-linux-blackfin ELF format and architecture"
+
+  release:
+    name: Create draft release
+    needs:
+      - test
+      - verify-binaries
     runs-on: ubuntu-24.04
     permissions:
       contents: write
