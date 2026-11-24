@@ -118,7 +118,18 @@ jobs:
       - name: Compile Blackfin binary
         run: |
           mkdir -p build
-          ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc -std=gnu99 -O2 -Wall -Wextra status.c -o build/status-linux-blackfin
+          ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-gcc -static -std=gnu99 -O2 -Wall -Wextra status.c -o build/status-linux-blackfin
+
+      - name: Smoke test Blackfin binary in the toolchain simulator
+        run: |
+          set -euo pipefail
+          ./opt/uClinux/bfin-linux-uclibc/bin/bfin-linux-uclibc-run \
+            --environment user \
+            --model bf532 \
+            --sysroot "$GITHUB_WORKSPACE/opt/uClinux/bfin-linux-uclibc/bfin-linux-uclibc/runtime" \
+            "$GITHUB_WORKSPACE/build/status-linux-blackfin" --help \
+            > build/status-linux-blackfin-help.txt
+          grep -q '^Usage modes:' build/status-linux-blackfin-help.txt
 
       - name: Upload Blackfin binary
         uses: actions/upload-artifact@v7
