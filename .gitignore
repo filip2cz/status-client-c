@@ -4,3 +4,6 @@ config.json
 status-client
 status-linux-x64
 /tests/test_status
+blackfin-toolchain-2014R1-RC2.x86_64.tar.bz2
+blackfin-toolchain-uclibc-default-2014R1-RC2.x86_64.tar.bz2
+/opt
