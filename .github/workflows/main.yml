@@ -100,6 +100,31 @@ jobs:
           path: build/status-linux-armv5te
           if-no-files-found: error
 
+  build-riscv64:
+    name: Build RISC-V 64-bit binary
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install RISC-V toolchain and development headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-riscv64-linux-gnu libc6-dev-riscv64-cross
+
+      - name: Compile RISC-V 64-bit binary
+        run: |
+          mkdir -p build
+          riscv64-linux-gnu-gcc -march=rv64gc -mabi=lp64d -std=gnu99 -O2 -Wall -Wextra -Wpedantic status.c -o build/status-linux-riscv64
+
+      - name: Upload RISC-V binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-riscv64
+          path: build/status-linux-riscv64
+          if-no-files-found: error
+
   build-blackfin:
     name: Build Blackfin binary
     needs: test
@@ -144,6 +169,7 @@ jobs:
       - build-x86
       - build-arm
       - build-armv5
+      - build-riscv64
       - build-blackfin
     runs-on: ubuntu-24.04
     steps:
@@ -156,7 +182,7 @@ jobs:
       - name: Install emulators and target runtimes
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y binutils qemu-user libc6-i386 libc6-arm64-cross libc6-armhf-cross libc6-armel-cross
+          sudo apt-get install --no-install-recommends -y binutils qemu-user libc6-i386 libc6-arm64-cross libc6-armhf-cross libc6-armel-cross libc6-riscv64-cross
 
       - name: Run binary smoke tests
         run: |
@@ -177,6 +203,7 @@ jobs:
           check_help status-linux-aarch64 qemu-aarch64 -L /usr/aarch64-linux-gnu ./build/status-linux-aarch64
           check_help status-linux-armv7l qemu-arm -cpu cortex-a8 -L /usr/arm-linux-gnueabihf ./build/status-linux-armv7l
           check_help status-linux-armv5te qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi ./build/status-linux-armv5te
+          check_help status-linux-riscv64 qemu-riscv64 -L /usr/riscv64-linux-gnu ./build/status-linux-riscv64
 
           for binary in build/status-linux-*; do
             test -s "$binary"
@@ -185,6 +212,11 @@ jobs:
           grep -q 'Class:.*ELF32' /tmp/status-linux-blackfin-elf.txt
           grep -q 'Machine:.*Blackfin' /tmp/status-linux-blackfin-elf.txt
           echo "PASS: status-linux-blackfin ELF format and architecture"
+
+          readelf -h build/status-linux-riscv64 > /tmp/status-linux-riscv64-elf.txt
+          grep -q 'Class:.*ELF64' /tmp/status-linux-riscv64-elf.txt
+          grep -q 'Machine:.*RISC-V' /tmp/status-linux-riscv64-elf.txt
+          echo "PASS: status-linux-riscv64 ELF format and architecture"
 
   release:
     name: Create draft release
